@@ -457,6 +457,15 @@ if os.path.isfile(js_path):
     check("  通过 addDOMWidget 挂钩", "addDOMWidget" in js)
     check("  Vue 模式下按当前宽度实时换算", "vueNodesMode" in js)
 
+    # 官方是在 addDOMWidget 返回之后【又赋值一次】computeLayoutSize，
+    # 所以必须用访问器接管，直接赋值会被冲掉（这是之前失效的原因）
+    check("  用 Object.defineProperty 访问器接管 computeLayoutSize",
+          "Object.defineProperty(widget" in js and "get:" in js and "set:" in js)
+    check("  未使用 writable:false（ES 模块严格模式下官方赋值会抛错）",
+          "writable" not in js)
+    check("  最小高度是固定常量，不由视频尺寸推导",
+          "MIN_PREVIEW_HEIGHT = 256" in js)
+
 print()
 print("=== 12. 视频加载（高级）===")
 import av
