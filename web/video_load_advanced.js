@@ -100,7 +100,7 @@ const MK_VIDEO_NODE_MIN_WIDTH = 460;
 const MK_VIDEO_NODE_MIN_HEIGHT = 560;
 const MK_VIDEO_NODE_DEFAULT_HEIGHT = 640;
 const MK_VIDEO_PREVIEW_MIN_HEIGHT = 160;
-const MK_VIDEO_PREVIEW_MAX_HEIGHT = 360;
+// 预览框高度跟随节点剩余空间，不再设上限（原 MAX_HEIGHT=360 会导致节点拉大后下方留黑）
 const MK_VIDEO_WIDGET_BASE_HEIGHT = 150;
 
 function createVideoUploadUI(node) {
@@ -117,30 +117,37 @@ function createVideoUploadUI(node) {
     let metadataRequestId = 0;
 
     const container = document.createElement("div");
+    // height:100% —— 撑满 litegraph 分配给该 DOM 控件的高度（computedHeight），
+    // 由 computeLayoutSize 负责申请空间，这里不再用 JS 计算几何尺寸。
     container.style.cssText =
-        "box-sizing:border-box;width:100%;min-height:280px;padding:6px;background:var(--comfy-menu-bg);border:1px solid var(--border-color);border-radius:6px;margin:4px 0;pointer-events:auto;display:flex;flex-direction:column;gap:6px;overflow:visible;position:relative;z-index:10;";
+        "box-sizing:border-box;width:100%;height:100%;min-height:0;padding:6px;background:var(--comfy-menu-bg);border:1px solid var(--border-color);border-radius:6px;margin:4px 0;pointer-events:auto;display:flex;flex-direction:column;gap:6px;overflow:hidden;position:relative;z-index:10;";
 
     const drop = document.createElement("div");
     drop.textContent = "拖入视频，或点击此处上传";
     drop.style.cssText =
-        "padding:7px;border:1px dashed var(--border-color);border-radius:6px;text-align:center;cursor:pointer;font-size:12px;";
+        "flex:none;padding:7px;border:1px dashed var(--border-color);border-radius:6px;text-align:center;cursor:pointer;font-size:12px;";
 
     const video = document.createElement("video");
     video.controls = false;
     video.preload = "metadata";
     video.disablePictureInPicture = true;
     video.setAttribute("controlsList", "nodownload noplaybackrate");
-    video.style.cssText = "display:block;width:100%;height:100%;object-fit:fill;background:#000;";
+    // object-fit 必须是 contain：容器比例与视频比例不一致时（例如框选区间后预览框变形）
+    // 用 fill 会把画面硬拉伸。contain 只会出现黑边，不会变形。
+    video.style.cssText = "display:block;width:100%;height:100%;object-fit:contain;background:#000;";
 
     const previewWrap = document.createElement("div");
-    previewWrap.style.cssText = `width:100%;height:${MK_VIDEO_PREVIEW_MIN_HEIGHT}px;overflow:hidden;background:#000;border-radius:4px;margin:0 auto;`;
+    // flex:1 1 auto —— 预览黑框自动吃掉容器里除按钮/信息行之外的全部空间，
+    // 节点拉大时黑框跟着变大；画面比例由 video 的 object-fit:contain 保证。
+    // 不要在这里写死宽高（写死会与节点尺寸互相喂养，导致节点无限变高）。
+    previewWrap.style.cssText = `flex:1 1 auto;min-height:${MK_VIDEO_PREVIEW_MIN_HEIGHT}px;width:100%;overflow:hidden;background:#000;border-radius:4px;`;
     previewWrap.appendChild(video);
 
     const info = document.createElement("div");
-    info.style.cssText = "box-sizing:border-box;font-size:11px;line-height:1.25;opacity:0.95;min-height:42px;overflow:hidden;padding:4px 6px;background:rgba(0,0,0,0.18);border-radius:4px;display:flex;flex-direction:column;gap:2px;";
+    info.style.cssText = "flex:none;box-sizing:border-box;font-size:11px;line-height:1.25;opacity:0.95;min-height:42px;overflow:hidden;padding:4px 6px;background:rgba(0,0,0,0.18);border-radius:4px;display:flex;flex-direction:column;gap:2px;";
 
     const controls = document.createElement("div");
-    controls.style.cssText = "box-sizing:border-box;display:flex;align-items:center;gap:6px;padding:4px 6px;background:rgba(0,0,0,0.18);border-radius:4px;";
+    controls.style.cssText = "flex:none;box-sizing:border-box;display:flex;align-items:center;gap:6px;padding:4px 6px;background:rgba(0,0,0,0.18);border-radius:4px;";
 
     const playBtn = document.createElement("button");
     playBtn.textContent = "▶";
@@ -177,7 +184,7 @@ function createVideoUploadUI(node) {
     controls.appendChild(progressWrap);
 
     const row = document.createElement("div");
-    row.style.cssText = "display:flex;gap:5px;flex-wrap:wrap;";
+    row.style.cssText = "flex:none;display:flex;gap:5px;flex-wrap:wrap;";
 
     const mkBtn = (label) => {
         const b = document.createElement("button");
@@ -240,20 +247,16 @@ function createVideoUploadUI(node) {
 
     const resizeNode = () => {
         requestAnimationFrame(() => {
-            const width = Math.max(MK_VIDEO_NODE_MIN_WIDTH, node.size?.[0] || MK_VIDEO_NODE_MIN_WIDTH);
-            const height = Math.max(MK_VIDEO_NODE_MIN_HEIGHT, node.size?.[1] || MK_VIDEO_NODE_DEFAULT_HEIGHT);
+            const nodeWidth = Math.max(MK_VIDEO_NODE_MIN_WIDTH, node.size?.[0] || MK_VIDEO_NODE_MIN_WIDTH);
+            const nodeHeight = Math.max(MK_VIDEO_NODE_MIN_HEIGHT, node.size?.[1] || MK_VIDEO_NODE_DEFAULT_HEIGHT);
             if ((node.size?.[0] || 0) < MK_VIDEO_NODE_MIN_WIDTH || (node.size?.[1] || 0) < MK_VIDEO_NODE_MIN_HEIGHT) {
-                node.setSize?.([width, height]);
+                node.setSize?.([nodeWidth, nodeHeight]);
             }
-            const [outputWidth, outputHeight] = getOutputSize();
-            const aspectRatio = outputWidth / outputHeight;
-            const maxPreviewWidth = Math.max(1, width - 24);
-            const naturalHeight = Math.max(MK_VIDEO_PREVIEW_MIN_HEIGHT, maxPreviewWidth / aspectRatio);
-            const previewHeight = Math.min(MK_VIDEO_PREVIEW_MAX_HEIGHT, naturalHeight);
-            const previewWidth = Math.min(maxPreviewWidth, Math.max(1, previewHeight * aspectRatio));
-            previewWrap.style.width = `${previewWidth}px`;
-            previewWrap.style.height = `${previewHeight}px`;
-            node._mkVideoWidgetHeight = MK_VIDEO_WIDGET_BASE_HEIGHT + previewHeight;
+            // 预览框尺寸完全交给 CSS flex（previewWrap 是 flex:1）和 litegraph 的
+            // computeLayoutSize 分配，这里只触发重绘。
+            //
+            // 绝对不要在 JS 里「按节点高度反推控件高度」——那会形成
+            // 控件撑大节点 → 节点撑大控件 的无限增长（实测会涨到 7000+ px）。
             app.graph.setDirtyCanvas(true, true);
         });
     };
@@ -528,9 +531,14 @@ registerExtensionSafe({
             const widget = node.addDOMWidget("mk_video_upload", "customwidget", container);
             widget.serialize = false;
             widget.hideOnZoom = false;
-            widget.computeSize = function (width) {
-                const height = node._mkVideoWidgetHeight || MK_VIDEO_WIDGET_BASE_HEIGHT + MK_VIDEO_PREVIEW_MIN_HEIGHT;
-                return [width, height];
+            widget.computeLayoutSize = function () {
+                // 声明最小高度，其余空间由 litegraph 的 distributeSpace 分配。
+                // 用 computeLayoutSize（可增长控件）而不是 computeSize（固定高度）：
+                // 后者需要一个「确定的高度值」，只能由节点尺寸反推，会形成无限增长。
+                return {
+                    minHeight: MK_VIDEO_WIDGET_BASE_HEIGHT + MK_VIDEO_PREVIEW_MIN_HEIGHT,
+                    minWidth: 0,
+                };
             };
             node._mkVideoWidget = widget;
             return widget;
@@ -626,9 +634,14 @@ registerExtensionSafe({
             const widget = node.addDOMWidget("mk_video_upload", "customwidget", node._mkVideoUI.container);
             widget.serialize = false;
             widget.hideOnZoom = false;
-            widget.computeSize = function (width) {
-                const height = node._mkVideoWidgetHeight || MK_VIDEO_WIDGET_BASE_HEIGHT + MK_VIDEO_PREVIEW_MIN_HEIGHT;
-                return [width, height];
+            widget.computeLayoutSize = function () {
+                // 声明最小高度，其余空间由 litegraph 的 distributeSpace 分配。
+                // 用 computeLayoutSize（可增长控件）而不是 computeSize（固定高度）：
+                // 后者需要一个「确定的高度值」，只能由节点尺寸反推，会形成无限增长。
+                return {
+                    minHeight: MK_VIDEO_WIDGET_BASE_HEIGHT + MK_VIDEO_PREVIEW_MIN_HEIGHT,
+                    minWidth: 0,
+                };
             };
             node._mkVideoWidget = widget;
             node.setSize([

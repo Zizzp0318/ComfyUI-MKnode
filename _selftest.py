@@ -636,6 +636,17 @@ if os.path.isfile(js_adv):
     check("  未带入 BatchLoadImages 的 UI", "createBrowserUI" not in js)
     check("  未带入 VNCCS 的 UI", "createVNCCSVisualUI" not in js)
 
+    # 预览区几何：这几个断言防止「画面变形」和「控件高度无限增长」回归
+    check("  video 用 object-fit:contain（不是 fill）",
+          "object-fit:contain" in js and "object-fit:fill" not in js)
+    check("  预览框用 flex:1 吃掉剩余空间（不是写死高度）",
+          "flex:1 1 auto" in js)
+    check("  控件用 computeLayoutSize 申请空间（不是 computeSize）",
+          "widget.computeLayoutSize" in js and "widget.computeSize" not in js)
+    check("  不在 JS 里按节点尺寸反推控件高度",
+          "_mkVideoWidgetHeight" not in js)
+    check("  容器撑满分配高度", "height:100%" in js)
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")
