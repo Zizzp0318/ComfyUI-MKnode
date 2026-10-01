@@ -201,8 +201,22 @@ function createVideoUploadUI(node) {
     row.appendChild(setEndBtn);
     row.appendChild(resetRangeBtn);
 
-    const refreshSource = () => {
+    // 已经加载进预览的文件名。用于避免重复加载同一个文件。
+    let lastLoadedFilename = null;
+
+    const refreshSource = (force = false) => {
         const filename = videoWidget.value;
+
+        // 同一个文件且 src 还在，就直接跳过。
+        //
+        // 为什么必须跳过：预览是把 /view?filename=... 直接交给 <video>，
+        // 这是一个长时间流式传输的请求。重复给 video.src 赋值会让浏览器
+        // 立即中断上一个正在传输的请求，服务端这边就会刷
+        // ConnectionResetError (WinError 10054) —— 而 ensureVideoUploadUI
+        // 在页面加载期间会被调用十几次，所以之前每开一个工作流就刷一堆。
+        if (!force && filename === lastLoadedFilename && video.getAttribute("src")) return;
+        lastLoadedFilename = filename;
+
         const requestId = ++metadataRequestId;
         sourceVideoMeta = null;
         video.pause();
@@ -359,7 +373,8 @@ function createVideoUploadUI(node) {
         }
         videoWidget.value = name;
         videoWidget.callback?.(name);
-        refreshSource();
+        // 强制刷新：重传同名文件时文件名没变，但内容变了，必须重新加载
+        refreshSource(true);
         app.graph.setDirtyCanvas(true);
     };
 
@@ -665,9 +680,11 @@ registerExtensionSafe({
             }
         };
         window.__mkScanVideoUploadUI = scan;
+        // 只扫一次，处理「页面加载时工作流里已存在该节点」的情况。
+        // 原来这里还在 8 个延迟点各扫一次（50/250/500/1000/1500/2500/4000/6000ms），
+        // 那是原包为兼容旧版前端的兜底；在当前前端版本上 onConfigure / onAdded
+        // 已经覆盖了这些场景，多余的扫描只会反复触发 refreshSource，
+        // 进而反复中断视频的 /view 流式请求。
         requestAnimationFrame(scan);
-        for (const delay of [50, 250, 500, 1000, 1500, 2500, 4000, 6000]) {
-            setTimeout(scan, delay);
-        }
     },
 });

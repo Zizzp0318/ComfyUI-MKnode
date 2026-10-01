@@ -647,6 +647,11 @@ if os.path.isfile(js_adv):
           "_mkVideoWidgetHeight" not in js)
     check("  容器撑满分配高度", "height:100%" in js)
 
+    # 防止反复中断视频的 /view 流式请求（会导致服务端刷 ConnectionResetError）
+    check("  refreshSource 有「同名文件跳过」守卫", "lastLoadedFilename" in js)
+    check("  已移除 8 次定时重扫", "for (const delay of" not in js)
+    check("  上传后走强制刷新（重传同名文件也要重载）", "refreshSource(true)" in js)
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")
