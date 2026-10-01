@@ -10,6 +10,7 @@ from .image_selector import MKImageSelector
 from .load_image import MKLoadImage
 from .save_image import MKSaveImage
 from .video import MKLoadVideo, MKSaveVideo
+from .video_load_advanced import MKVideoLoadAdvanced
 
 NODE_CLASSES = [
     MKLoadImage,
@@ -17,6 +18,7 @@ NODE_CLASSES = [
     MKSaveImage,
     MKLoadVideo,
     MKSaveVideo,
+    MKVideoLoadAdvanced,
 ]
 
 __all__ = [
@@ -26,4 +28,5 @@ __all__ = [
     "MKSaveImage",
     "MKLoadVideo",
     "MKSaveVideo",
+    "MKVideoLoadAdvanced",
 ]

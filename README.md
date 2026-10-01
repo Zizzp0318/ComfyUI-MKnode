@@ -13,15 +13,17 @@ MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存，视�
 | MK-图像保存 | 保存图像，支持 PNG / JPEG / WEBP |
 | MK-加载视频 | 从 input 目录加载视频 |
 | MK-保存视频 | 保存视频，支持 mp4 / mkv / webm |
+| MK-视频加载（高级） | 加载视频并拆成图像序列，支持抽帧、缩放、裁剪区间与音频提取 |
 
 ## 安装
 
 ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/Zizzp0318/ComfyUI-MKnode.git
+pip install -r ComfyUI-MKnode/requirements.txt
 ```
 
-重启 ComfyUI 即可，无需额外依赖（只用到 ComfyUI 自带的 torch / Pillow / PyAV）。
+重启 ComfyUI 即可。`MK-视频加载（高级）` 需要 `opencv-python`（见 requirements.txt）；音频提取还需要系统里有 `ffmpeg`，没有时会自动跳过音频而不报错。
 
 ## 节点参数
 
@@ -80,6 +82,28 @@ git clone https://github.com/Zizzp0318/ComfyUI-MKnode.git
 
 输出：`视频`（原样透传）。
 
+### MK-视频加载（高级）
+
+把视频拆成图像序列，节点上带预览播放器（可拖入文件或点击上传，支持在时间轴上框选区间）。
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 视频 | — | 从 input 目录选择（含子目录），支持直接上传 |
+| 强制帧率 | 0 | 0 表示保持源帧率；大于 0 时按该帧率抽帧 |
+| 自定义宽度 | 0 | 0 表示保持源宽度 |
+| 自定义高度 | 0 | 0 表示保持源高度 |
+| 最大加载帧数 | 0 | 0 表示不限制 |
+| 跳过开头帧数 | 0 | |
+| 每 N 帧取 1 | 1 | |
+| 预览帧率 | 24 | 仅影响节点上的预览播放速度，不影响输出 |
+| 加载后删除 | 关 | 加载完成后删除该视频。**仅对上传到 `input/mk_video_uploads/` 的文件生效**，其他路径一律拒绝删除 |
+
+输出：`图像`、`帧数`、`音频`、`视频信息`、`VHS视频信息`。
+
+- 只填宽度或高度其中一边时，另一边按源比例自动推算；两边都填则精确匹配。
+- 视频信息输出使用 `AICOSER_VIDEOINFO` 类型，与 [ComfyUI-AICoser-Tools](https://github.com/Zizzp0318/ComfyUI-AICoser-Tools) 保持兼容；`VHS视频信息` 使用 `VHS_VIDEOINFO`，需配合 VideoHelperSuite 使用。
+- 音频提取依赖 ffmpeg；找不到时会输出空音频并打印提示，不影响图像输出。
+
 ## 关于视频节点尺寸
 
 官方 `LoadVideo` / `SaveVideo` 在加载视频后节点尺寸会被固定，无法自由缩放，且每次重新加载尺寸会跳变。
@@ -92,6 +116,7 @@ git clone https://github.com/Zizzp0318/ComfyUI-MKnode.git
 
 - 图像加载直接复用官方 `LoadImage` 的加载逻辑，保证 pyav / Pillow 两条路径（含动画 WebP 回退、EXIF 旋转、alpha 转遮罩）与上游一致。
 - 图像选择器迁移自 [Comfyui_LG_Tools](https://github.com/LAOGOU-666/Comfyui_LG_Tools) 的 ImageSelector，交互逻辑保持一致，并删除了 `keep_last_selection` 模式。
+- 视频加载（高级）迁移自 [ComfyUI-AICoser-Tools](https://github.com/Zizzp0318/ComfyUI-AICoser-Tools) 的 `Load Video (Upload)`，取帧 / 缩放 / 音频 / 元数据逻辑保持一致，界面文案已汉化。为避免与原包冲突，路由、上传子目录、DOM 控件名均加了 MK 前缀。
 - 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；图像选择器为交互式输出节点，保留 V1 写法。
 
 ## 自测

@@ -1,0 +1,3 @@
+# MK-视频加载（高级）依赖 opencv-python 读取视频帧。
+# 其余节点只用 ComfyUI 自带依赖，无需安装。
+opencv-python
