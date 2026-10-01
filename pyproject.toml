@@ -1,0 +1,10 @@
+[project]
+name = "comfyui-mknode"
+version = "0.1.0"
+description = "MK 系列 ComfyUI 自定义节点"
+license = "MIT"
+requires-python = ">=3.10"
+
+[tool.comfy]
+PublisherId = "mknode"
+DisplayName = "Comfyui_MKnode"
