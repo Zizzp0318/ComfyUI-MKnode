@@ -1,6 +1,6 @@
 # ComfyUI-MKnode
 
-MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存，视频加载 / 保存。
+MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存、提示词拼接。
 
 所有节点都在 **`MK节点`** 分类下。
 
@@ -10,10 +10,8 @@ MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存，视�
 | --- | --- |
 | MK-加载图像 | 加载图像，可按目标总像素等比缩放 |
 | MK-图像选择器 | 执行时暂停，手动挑选图像后再继续 |
+| MK-提示词拼接 | 把多段提示词按分隔符拼成一条，输入端可动态增减 |
 | MK-图像保存 | 保存图像，支持 PNG / JPEG / WEBP |
-| MK-加载视频 | 从 input 目录加载视频 |
-| MK-保存视频 | 保存视频，支持 mp4 / mkv / webm |
-| MK-视频加载（高级） | 加载视频并拆成图像序列，支持抽帧、缩放、裁剪区间与音频提取 |
 
 ## 安装
 
@@ -23,7 +21,7 @@ git clone https://github.com/Zizzp0318/ComfyUI-MKnode.git
 pip install -r ComfyUI-MKnode/requirements.txt
 ```
 
-重启 ComfyUI 即可。`MK-视频加载（高级）` 需要 `opencv-python`（见 requirements.txt）；音频提取还需要系统里有 `ffmpeg`，没有时会自动跳过音频而不报错。
+重启 ComfyUI 即可。本包不需要额外依赖，`requirements.txt` 只是空占位，保证上面的 `pip install` 命令依然可用。
 
 ## 节点参数
 
@@ -52,6 +50,22 @@ pip install -r ComfyUI-MKnode/requirements.txt
 
 点选图像后按钮会显示已选数量，点「确认选择」继续；点「取消运行」中断整个执行。
 
+### MK-提示词拼接
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 分隔符 | `, ` | 连接各段提示词的字符串 |
+| 提示词 01 ~ 10 | 空 | 待拼接的提示词，**只能连线**，不提供文本框 |
+
+输出：`提示词`（拼接结果）。
+
+- 输入端是动态的：连满当前输入后节点会自动补一个空槽，最多 10 个；断开末尾输入会自动收起。
+- 空输入（未连接或空串）不参与拼接，因此最终结果里不会出现多余的分隔符。
+
+> 拼接节点迁移自 [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) 的 `easy promptConcat`。
+> 为兼容源包已保存的工作流，节点 id（`MK_PromptConcat`）与内部输入 id（`分隔符`、`提示词_01`…）
+> 都保持了原样，与包内其他节点「内部 id 用英文」的约定不同。
+
 ### MK-图像保存
 
 | 参数 | 默认 | 说明 |
@@ -67,57 +81,12 @@ pip install -r ComfyUI-MKnode/requirements.txt
 
 > 若以 `--disable-metadata` 启动 ComfyUI，即使开关打开也不会写入元数据（与官方 SaveImage 行为一致）。
 
-### MK-加载视频
-
-从 input 目录加载视频，支持直接上传。节点上会显示视频预览。
-
-### MK-保存视频
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| 视频 | — | 要保存的视频 |
-| 文件名前缀 | video/ComfyUI | 支持占位符 |
-| 格式 | auto | auto / mp4 / mkv / webm。auto 时 AV1 用 WebM，其余用 MP4 |
-| 编解码器 | auto | auto / h264 / av1，可选重新编码并指定 CRF |
-
-输出：`视频`（原样透传）。
-
-### MK-视频加载（高级）
-
-把视频拆成图像序列，节点上带预览播放器（可拖入文件或点击上传，支持在时间轴上框选区间）。
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| 视频 | — | 从 input 目录选择（含子目录），支持直接上传 |
-| 强制帧率 | 0 | 0 表示保持源帧率；大于 0 时按该帧率抽帧 |
-| 自定义宽度 | 0 | 0 表示保持源宽度 |
-| 自定义高度 | 0 | 0 表示保持源高度 |
-| 最大加载帧数 | 0 | 0 表示不限制 |
-| 跳过开头帧数 | 0 | |
-| 每 N 帧取 1 | 1 | |
-| 预览帧率 | 24 | 仅影响节点上的预览播放速度，不影响输出 |
-| 加载后删除 | 关 | 加载完成后删除该视频。**仅对上传到 `input/mk_video_uploads/` 的文件生效**，其他路径一律拒绝删除 |
-
-输出：`图像`、`帧数`、`音频`、`视频信息`、`VHS视频信息`。
-
-- 只填宽度或高度其中一边时，另一边按源比例自动推算；两边都填则精确匹配。
-- 视频信息输出使用 `AICOSER_VIDEOINFO` 类型，与 [ComfyUI-AICoser-Tools](https://github.com/Zizzp0318/ComfyUI-AICoser-Tools) 保持兼容；`VHS视频信息` 使用 `VHS_VIDEOINFO`，需配合 VideoHelperSuite 使用。
-- 音频提取依赖 ffmpeg；找不到时会输出空音频并打印提示，不影响图像输出。
-
-## 关于视频节点尺寸
-
-官方 `LoadVideo` / `SaveVideo` 在加载视频后节点尺寸会被固定，无法自由缩放，且每次重新加载尺寸会跳变。
-
-原因是前端 `useNodeVideo` 把「按**加载那一刻**的节点宽度算出的等比高度」写入了控件的最小尺寸约束，而这个值算出来就冻结了；`LGraphNode` 又把它当作节点宽度和高度的硬下限。
-
-本包通过 `web/video_node_resize.js` 接管该控件的尺寸计算，让节点可以自由缩放。该修复**同时作用于官方节点**，如果不想改动官方节点行为，删掉脚本里 `TARGET_NODE_NAMES` 的后两项即可。
-
 ## 说明
 
 - 图像加载直接复用官方 `LoadImage` 的加载逻辑，保证 pyav / Pillow 两条路径（含动画 WebP 回退、EXIF 旋转、alpha 转遮罩）与上游一致。
 - 图像选择器迁移自 [Comfyui_LG_Tools](https://github.com/LAOGOU-666/Comfyui_LG_Tools) 的 ImageSelector，交互逻辑保持一致，并删除了 `keep_last_selection` 模式。
-- 视频加载（高级）迁移自 [ComfyUI-AICoser-Tools](https://github.com/Zizzp0318/ComfyUI-AICoser-Tools) 的 `Load Video (Upload)`，取帧 / 缩放 / 音频 / 元数据逻辑保持一致，界面文案已汉化。为避免与原包冲突，路由、上传子目录、DOM 控件名均加了 MK 前缀。
-- 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；图像选择器为交互式输出节点，保留 V1 写法。
+- 提示词拼接迁移自 [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) 的 `easy promptConcat`，节点 id 与内部输入 id 保持原样以兼容源包工作流。
+- 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；图像选择器（交互式输出）与提示词拼接（依赖未声明的动态输入）保留 V1 写法。
 
 ## 自测
 
@@ -128,7 +97,7 @@ cd ComfyUI
 python custom_nodes/ComfyUI-MKnode/_selftest.py
 ```
 
-脚本会在 `input/` 临时生成测试图并自行清理。
+脚本会在 `input/` 下生成并复用测试图（`mk_test_alpha.png` / `mk_test_noalpha.jpg`），**不会自动删除**——介意的话跑完手动清理。
 
 ## 许可
 

@@ -1,3 +1,4 @@
-# MK-视频加载（高级）依赖 opencv-python 读取视频帧。
-# 其余节点只用 ComfyUI 自带依赖，无需安装。
-opencv-python
+# 本包所有节点都只用 ComfyUI 自带依赖（torch / numpy / Pillow / aiohttp），
+# 无需额外安装。
+#
+# 保留此文件是为了让 README 里的 `pip install -r requirements.txt` 依然可用。
