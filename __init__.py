@@ -11,6 +11,7 @@ ComfyUI 的加载器对两者是 if/elif 二选一，而包内同时存在：
 """
 
 from .nodes import (
+    MKImageCrop,
     MKImageSelector,
     MKLoadImage,
     MKPromptConcat,
@@ -23,6 +24,7 @@ NODE_CLASS_MAPPINGS = {
     "MK_LoadImage": MKLoadImage,
     "MK_ImageSelector": MKImageSelector,
     "MK_PromptConcat": MKPromptConcat,
+    "MK_ImageCrop": MKImageCrop,
     "MK_SaveImage": MKSaveImage,
 }
 
@@ -31,6 +33,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_LoadImage": "MK-加载图像",
     "MK_ImageSelector": "MK-图像选择器",
     "MK_PromptConcat": "MK-提示词拼接",
+    "MK_ImageCrop": "MK-图像裁剪",
     "MK_SaveImage": "MK-图像保存",
 }
 

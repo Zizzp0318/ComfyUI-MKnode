@@ -130,6 +130,7 @@ print("  NODE_DISPLAY_NAME    :", pkg.NODE_DISPLAY_NAME_MAPPINGS)
 check("  注册了 MK_LoadImage", "MK_LoadImage" in mappings)
 check("  注册了 MK_ImageSelector", "MK_ImageSelector" in mappings)
 check("  注册了 MK_PromptConcat", "MK_PromptConcat" in mappings)
+check("  注册了 MK_ImageCrop", "MK_ImageCrop" in mappings)
 check("  MK_LoadImage 指向本模块的类", mappings.get("MK_LoadImage") is MKLoadImage)
 check("  显示名映射与类映射一一对应",
       set(pkg.NODE_DISPLAY_NAME_MAPPINGS) == set(mappings),
@@ -399,7 +400,103 @@ finally:
     shutil.rmtree(tmp_tmp, ignore_errors=True)
 
 print()
-print("=== 10. 提示词拼接（MK_PromptConcat，V1）===")
+print("=== 10. 图像裁剪（MK_ImageCrop）===")
+from Comfyui_MKnode.nodes.image_crop import MKImageCrop, POSITIONS, POSITION_KEYWORDS
+
+crop_schema = MKImageCrop.GET_SCHEMA()
+print("  node_id      :", crop_schema.node_id)
+print("  display_name :", crop_schema.display_name)
+print("  category     :", crop_schema.category)
+print("  inputs       :", [(i.id, getattr(i, "display_name", None)) for i in crop_schema.inputs])
+print("  outputs      :", [(o.id, getattr(o, "display_name", None)) for o in crop_schema.outputs])
+
+check("  node_id 为 MK_ImageCrop", crop_schema.node_id == "MK_ImageCrop", crop_schema.node_id)
+check("  显示名为 MK-图像裁剪", crop_schema.display_name == "MK-图像裁剪", crop_schema.display_name)
+check("  分类为 MK节点", crop_schema.category == "MK节点", crop_schema.category)
+check("  输入 id 保持源包中文原样",
+      [i.id for i in crop_schema.inputs] == ["图像", "宽度", "高度", "位置", "X轴偏移", "Y轴偏移"],
+      str([i.id for i in crop_schema.inputs]))
+check("  输出为 IMAGE/x/y",
+      [o.id for o in crop_schema.outputs] == ["IMAGE", "x", "y"],
+      str([o.id for o in crop_schema.outputs]))
+check("  所有输入都有中文显示名",
+      all(getattr(i, "display_name", None) for i in crop_schema.inputs),
+      str([(i.id, getattr(i, "display_name", None)) for i in crop_schema.inputs]))
+check("  位置选项 9 个且为中文",
+      len(POSITIONS) == 9 and POSITIONS[0] == "左上角", str(POSITIONS))
+check("  位置选项与方位关键字表一一对应",
+      set(POSITIONS) == set(POSITION_KEYWORDS),
+      str(set(POSITIONS) ^ set(POSITION_KEYWORDS)))
+
+# 用「像素值编码自身坐标」的图：裁剪结果可以直接和期望区域逐元素比对。
+# 只比返回的坐标是不够的——坐标对但内容取错区域，光看坐标发现不了。
+CH, CW = 60, 100
+crop_src = torch.zeros((1, CH, CW, 3))
+crop_src[0, :, :, 0] = torch.arange(CW).float() / CW          # R 通道编码 x
+crop_src[0, :, :, 1] = torch.arange(CH).float().view(-1, 1) / CH  # G 通道编码 y
+
+# 期望坐标按「位置语义」手推（不引用实现里的公式），100x60 图上裁 40x20
+EXPECT_POS = [
+    ("左上角", 0, 0),
+    ("上方居中", 30, 0),
+    ("右上角", 60, 0),
+    ("右侧居中", 60, 20),
+    ("右下角", 60, 40),
+    ("下方居中", 30, 40),
+    ("左下角", 0, 40),
+    ("左侧居中", 0, 20),
+    ("居中", 30, 20),
+]
+for pos, ex, ey in EXPECT_POS:
+    out, gx, gy = MKImageCrop.execute(
+        图像=crop_src, 宽度=40, 高度=20, 位置=pos, X轴偏移=0, Y轴偏移=0).result
+    same = bool((out == crop_src[:, ey:ey + 20, ex:ex + 40, :]).all())
+    print(f"  {pos:6s} -> x={gx:<3d} y={gy:<3d} shape={tuple(out.shape)} 内容一致={same}")
+    check(f"  {pos} 坐标正确", (gx, gy) == (ex, ey), f"得到 ({gx},{gy}) 期望 ({ex},{ey})")
+    check(f"  {pos} 尺寸正确", tuple(out.shape) == (1, 20, 40, 3), str(tuple(out.shape)))
+    check(f"  {pos} 内容正确", same)
+
+# 偏移量叠加在基准位置之上
+out, gx, gy = MKImageCrop.execute(
+    图像=crop_src, 宽度=40, 高度=20, 位置="居中", X轴偏移=10, Y轴偏移=-5).result
+print(f"  居中+偏移(10,-5) -> x={gx} y={gy} shape={tuple(out.shape)}")
+check("  偏移叠加正确", (gx, gy) == (40, 15), f"得到 ({gx},{gy}) 期望 (40,15)")
+check("  偏移后内容正确", bool((out == crop_src[:, 15:35, 40:80, :]).all()))
+
+# 裁剪尺寸超过原图 → 收敛到原图
+out, gx, gy = MKImageCrop.execute(
+    图像=crop_src, 宽度=250, 高度=200, 位置="居中", X轴偏移=0, Y轴偏移=0).result
+print(f"  尺寸超原图 250x200 -> x={gx} y={gy} shape={tuple(out.shape)}")
+check("  超尺寸收敛到原图", tuple(out.shape) == (1, CH, CW, 3), str(tuple(out.shape)))
+check("  超尺寸后起点归零", (gx, gy) == (0, 0), f"得到 ({gx},{gy})")
+
+# 越界：夹回边界但「不重算尺寸」，所以负偏移会让结果变小 —— 上游行为，刻意保留
+out, gx, gy = MKImageCrop.execute(
+    图像=crop_src, 宽度=40, 高度=20, 位置="居中", X轴偏移=-50, Y轴偏移=0).result
+print(f"  负偏移越界(-50) -> x={gx} y={gy} shape={tuple(out.shape)}")
+check("  负偏移起点夹到 0", gx == 0, str(gx))
+check("  负偏移结果变窄（上游行为）", tuple(out.shape) == (1, 20, 20, 3), str(tuple(out.shape)))
+
+out, gx, gy = MKImageCrop.execute(
+    图像=crop_src, 宽度=40, 高度=20, 位置="左上角", X轴偏移=90, Y轴偏移=0).result
+print(f"  右越界(+90) -> x={gx} y={gy} shape={tuple(out.shape)}")
+check("  右越界结果变窄（上游行为）", tuple(out.shape) == (1, 20, 10, 3), str(tuple(out.shape)))
+
+# 批量：每张图用同一组参数，batch 维必须保留
+batch = torch.cat([crop_src, crop_src * 0.5, crop_src * 0.25], dim=0)
+out, gx, gy = MKImageCrop.execute(
+    图像=batch, 宽度=40, 高度=20, 位置="居中", X轴偏移=0, Y轴偏移=0).result
+print(f"  批量 batch=3 -> shape={tuple(out.shape)}")
+check("  批量裁剪保留 batch 维", tuple(out.shape) == (3, 20, 40, 3), str(tuple(out.shape)))
+check("  批量每张各自裁剪（未串图）", bool((out[0] == out[1] * 2).all()))
+
+check("  已注册 MK_ImageCrop", "MK_ImageCrop" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名已登记",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_ImageCrop") == "MK-图像裁剪",
+      str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_ImageCrop")))
+
+print()
+print("=== 11. 提示词拼接（MK_PromptConcat，V1）===")
 from Comfyui_MKnode.nodes.prompt_concat import (
     MKPromptConcat,
     MAX_PROMPT_INPUTS,

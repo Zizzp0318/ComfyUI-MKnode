@@ -6,6 +6,7 @@
 3. 把节点类加进 NODE_CLASSES
 """
 
+from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
 from .load_image import MKLoadImage
 from .prompt_concat import MKPromptConcat
@@ -15,6 +16,7 @@ NODE_CLASSES = [
     MKLoadImage,
     MKImageSelector,
     MKPromptConcat,
+    MKImageCrop,
     MKSaveImage,
 ]
 
@@ -23,5 +25,6 @@ __all__ = [
     "MKLoadImage",
     "MKImageSelector",
     "MKPromptConcat",
+    "MKImageCrop",
     "MKSaveImage",
 ]

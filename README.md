@@ -10,6 +10,7 @@ MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存、提�
 | --- | --- |
 | MK-加载图像 | 加载图像，可按目标总像素等比缩放 |
 | MK-图像选择器 | 执行时暂停，手动挑选图像后再继续 |
+| MK-图像裁剪 | 按位置与偏移裁剪图像，输出实际裁剪起点坐标 |
 | MK-提示词拼接 | 把多段提示词按分隔符拼成一条，输入端可动态增减 |
 | MK-图像保存 | 保存图像，支持 PNG / JPEG / WEBP |
 
@@ -50,6 +51,26 @@ pip install -r ComfyUI-MKnode/requirements.txt
 
 点选图像后按钮会显示已选数量，点「确认选择」继续；点「取消运行」中断整个执行。
 
+### MK-图像裁剪
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 图像 | — | 待裁剪的图像，支持批量（批次内每张图用同一组参数） |
+| 宽度 | 256 | 裁剪宽度，步长 8。超过原图宽度时自动收敛到原图宽度 |
+| 高度 | 256 | 裁剪高度，步长 8。超过原图高度时自动收敛到原图高度 |
+| 位置 | 左上角 | 左上角 / 上方居中 / 右上角 / 右侧居中 / 右下角 / 下方居中 / 左下角 / 左侧居中 / 居中 |
+| X 轴偏移 | 0 | 在基准位置之上再横向移动，可为负 |
+| Y 轴偏移 | 0 | 在基准位置之上再纵向移动，可为负 |
+
+输出：`图像`（裁剪结果）、`X 坐标`、`Y 坐标`（实际裁剪起点，已过边界检查）。
+
+- 裁剪尺寸超过原图时自动收敛到原图尺寸，不会报错。
+- 越界时把裁剪框夹回图像范围内，**但不会据此重算尺寸**——因此负偏移会让结果变小，而不是把窗口平移出去。这与上游 `ImageCrop+` 的行为一致，刻意保留。
+
+> 裁剪节点迁移自 [ComfyUI_essentials](https://github.com/cubiq/ComfyUI_essentials) 的 `ImageCrop+`。
+> 为兼容源包已保存的工作流，节点 id（`MK_ImageCrop`）、内部输入 id（`图像`、`宽度`…）
+> 与「位置」的选项值都保持中文原样，与包内其他节点「内部 id 用英文」的约定不同。
+
 ### MK-提示词拼接
 
 | 参数 | 默认 | 说明 |
@@ -85,12 +106,13 @@ pip install -r ComfyUI-MKnode/requirements.txt
 
 - 图像加载直接复用官方 `LoadImage` 的加载逻辑，保证 pyav / Pillow 两条路径（含动画 WebP 回退、EXIF 旋转、alpha 转遮罩）与上游一致。
 - 图像选择器迁移自 [Comfyui_LG_Tools](https://github.com/LAOGOU-666/Comfyui_LG_Tools) 的 ImageSelector，交互逻辑保持一致，并删除了 `keep_last_selection` 模式。
+- 图像裁剪迁移自 [ComfyUI_essentials](https://github.com/cubiq/ComfyUI_essentials) 的 `ImageCrop+`，坐标计算与边界处理逐行保持上游行为。
 - 提示词拼接迁移自 [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) 的 `easy promptConcat`，节点 id 与内部输入 id 保持原样以兼容源包工作流。
 - 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；图像选择器（交互式输出）与提示词拼接（依赖未声明的动态输入）保留 V1 写法。
 
 ## 自测
 
-仓库内带一份自测脚本，覆盖 schema、尺寸算法、各格式保存、元数据开关、仅预览、i18n 结构等：
+仓库内带一份自测脚本，覆盖 schema、尺寸算法、裁剪坐标、各格式保存、元数据开关、仅预览、i18n 结构等：
 
 ```bash
 cd ComfyUI
