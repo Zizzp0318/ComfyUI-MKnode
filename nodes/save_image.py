@@ -123,6 +123,11 @@ class MKSaveImage(io.ComfyNode):
             array = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
             pil_image = Image.fromarray(array)
 
+            # JPEG 不支持 Alpha 通道（RGBA / LA / P 等），保存前统一转为 RGB 三通道，
+            # 否则 PIL 会抛出 "cannot write mode RGBA as JPEG"。PNG / WEBP 保留原通道。
+            if image_format == "JPEG" and pil_image.mode != "RGB":
+                pil_image = pil_image.convert("RGB")
+
             filename_with_batch_num = filename.replace("%batch_num%", str(batch_number))
             file = f"{filename_with_batch_num}_{counter:05}_.{extension}"
 
