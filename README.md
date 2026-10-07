@@ -1,6 +1,6 @@
 # ComfyUI-MKnode
 
-MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存、提示词拼接。
+MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存、提示词拼接、提示词预设管理。
 
 所有节点都在 **`MK节点`** 分类下。
 
@@ -12,6 +12,7 @@ MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存、提�
 | MK-图像选择器 | 执行时暂停，手动挑选图像后再继续 |
 | MK-图像裁剪 | 按位置与偏移裁剪图像，输出实际裁剪起点坐标 |
 | MK-提示词拼接 | 把多段提示词按分隔符拼成一条，输入端可动态增减 |
+| MK-提示词预设管理 | 带预设库的文本框，可选预设一键填入，并把数字转写成中文 |
 | MK-图像保存 | 保存图像，支持 PNG / JPEG / WEBP |
 
 ## 安装
@@ -87,6 +88,30 @@ pip install -r ComfyUI-MKnode/requirements.txt
 > 为兼容源包已保存的工作流，节点 id（`MK_PromptConcat`）与内部输入 id（`分隔符`、`提示词_01`…）
 > 都保持了原样，与包内其他节点「内部 id 用英文」的约定不同。
 
+### MK-提示词预设管理
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 文本 | 空 | 要输出的文本。从下面的下拉选择预设时会自动填入 |
+| 提示词类型 | 无 | 预设的大分类，前端渲染为下拉框 |
+| 提示词细分 | 无 | 该分类下的具体预设，选中后自动填入「文本」 |
+
+输出：`原文`（原样文本）、`数字转中文`（把文本中的阿拉伯数字转写成中文读法）。
+
+节点上带一个「提示词预设管理」按钮，点开后可：
+
+- 新建 / 重命名 / 删除「提示词类型」，并拖动排序；
+- 在每个类型下增删「细分」并编辑内容，支持从 `.txt` / `.md` 导入、拖动排序、批量移动；
+- 「收藏」是常驻分类：在文本框右键、或在「历史提示词」条目上右键即可收藏；
+- 文本框左下角的 ◷ 按钮打开「历史提示词」，保留最近 100 条。
+
+预设与历史优先写服务端（`<ComfyUI 用户目录>/Comfyui_MKnode/`），localStorage 作离线兜底，因此刷新页面或换设备不会丢。
+
+> 迁移自 ComfyUI-xiaozhuguang 的「小珠光文本框-化神级」。
+> 节点 id 由 `XiaozhuguangTextBoxGod` 改为 `MK_PromptPreset`，存储路由由 `/xzg_cloud_store` 改为 `/mk_prompt_store`；
+> 前端 window 全局、CSS 类名与事件名均加 `mk` 前缀以与源包隔离。
+> 输入 id（`text` / `preset_category` / `preset_name`）为英文，符合包内约定；「数字转中文」引擎逐行保留，行为与源包一致。
+
 ### MK-图像保存
 
 | 参数 | 默认 | 说明 |
@@ -108,7 +133,8 @@ pip install -r ComfyUI-MKnode/requirements.txt
 - 图像选择器迁移自 [Comfyui_LG_Tools](https://github.com/LAOGOU-666/Comfyui_LG_Tools) 的 ImageSelector，交互逻辑保持一致，并删除了 `keep_last_selection` 模式。
 - 图像裁剪迁移自 [ComfyUI_essentials](https://github.com/cubiq/ComfyUI_essentials) 的 `ImageCrop+`，坐标计算与边界处理逐行保持上游行为。
 - 提示词拼接迁移自 [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) 的 `easy promptConcat`，节点 id 与内部输入 id 保持原样以兼容源包工作流。
-- 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；图像选择器（交互式输出）与提示词拼接（依赖未声明的动态输入）保留 V1 写法。
+- 提示词预设管理迁移自 ComfyUI-xiaozhuguang 的「小珠光文本框-化神级」，数字转中文引擎逐行保留、未改行为；节点 id、存储路由与前端命名空间已按本包约定改名。
+- 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；图像选择器（交互式输出）、提示词拼接（依赖未声明的动态输入）与提示词预设管理（前端把两个 STRING 控件替换为动态下拉）保留 V1 写法。
 
 ## 自测
 

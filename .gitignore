@@ -6,3 +6,4 @@ __pycache__/
 
 # 本地工作区数据（含内部笔记），不随仓库发布
 .workbuddy-ai/
+.workbuddy/
