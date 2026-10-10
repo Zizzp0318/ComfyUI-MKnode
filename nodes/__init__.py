@@ -10,6 +10,7 @@ from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
 from .load_image import MKLoadImage
 from .prompt_concat import MKPromptConcat
+from .prompt_library import MKPromptLibrary
 from .prompt_preset import MKPromptPreset
 from .save_image import MKSaveImage
 
@@ -18,6 +19,7 @@ NODE_CLASSES = [
     MKImageSelector,
     MKPromptConcat,
     MKPromptPreset,
+    MKPromptLibrary,
     MKImageCrop,
     MKSaveImage,
 ]
@@ -28,6 +30,7 @@ __all__ = [
     "MKImageSelector",
     "MKPromptConcat",
     "MKPromptPreset",
+    "MKPromptLibrary",
     "MKImageCrop",
     "MKSaveImage",
 ]

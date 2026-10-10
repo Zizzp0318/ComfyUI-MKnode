@@ -15,6 +15,7 @@ from .nodes import (
     MKImageSelector,
     MKLoadImage,
     MKPromptConcat,
+    MKPromptLibrary,
     MKPromptPreset,
     MKSaveImage,
 )
@@ -26,6 +27,7 @@ NODE_CLASS_MAPPINGS = {
     "MK_ImageSelector": MKImageSelector,
     "MK_PromptConcat": MKPromptConcat,
     "MK_PromptPreset": MKPromptPreset,
+    "MK_PromptLibrary": MKPromptLibrary,
     "MK_ImageCrop": MKImageCrop,
     "MK_SaveImage": MKSaveImage,
 }
@@ -36,6 +38,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_ImageSelector": "MK-图像选择器",
     "MK_PromptConcat": "MK-提示词拼接",
     "MK_PromptPreset": "MK-提示词预设管理",
+    "MK_PromptLibrary": "MK-提示词大全",
     "MK_ImageCrop": "MK-图像裁剪",
     "MK_SaveImage": "MK-图像保存",
 }
