@@ -147,7 +147,7 @@ check("  前端 JS 存在", os.path.isfile(os.path.join(web_dir, "image_selector
 check("  提示词拼接前端 JS 存在", os.path.isfile(os.path.join(web_dir, "prompt_concat.js")))
 
 print()
-print("=== 7. 图像选择器（V1）契约 ===")
+print("=== 7. 图像选择器契约（V3 节点 + V1 兼容层）===")
 from Comfyui_MKnode.nodes.image_selector import MKImageSelector, ROUTE_SELECT, EVENT_UPDATE, EVENT_SELECTION
 
 it = MKImageSelector.INPUT_TYPES()
@@ -157,14 +157,19 @@ print("  RETURN_TYPES         :", MKImageSelector.RETURN_TYPES, MKImageSelector.
 print("  OUTPUT_NODE/IS_LIST  :", MKImageSelector.OUTPUT_NODE, MKImageSelector.OUTPUT_IS_LIST, MKImageSelector.INPUT_IS_LIST)
 print("  路由                 :", ROUTE_SELECT)
 print("  事件                 :", EVENT_UPDATE, "/", EVENT_SELECTION)
+
+# V3 节点的 INPUT_TYPES 兼容层与 V1 写法不同：
+#   V1 -> ("always_pause", {...})   V3 shim -> ("COMBO", {"options": [...]})
+_mode_spec = it["required"]["mode"]
+_mode_options = _mode_spec[0] if isinstance(_mode_spec[0], list) else _mode_spec[1].get("options")
 check("  mode 选项已移除 keep_last_selection",
-      it["required"]["mode"][0] == ["always_pause", "passthrough"],
-      str(it["required"]["mode"][0]))
+      list(_mode_options) == ["always_pause", "passthrough"],
+      str(_mode_options))
 check("  hidden 含 prompt/unique_id/extra_pnginfo",
       set(it["hidden"]) == {"prompt", "unique_id", "extra_pnginfo"})
-check("  返回类型 IMAGE/STRING", MKImageSelector.RETURN_TYPES == ("IMAGE", "STRING"))
+check("  返回类型 IMAGE/STRING", tuple(MKImageSelector.RETURN_TYPES) == ("IMAGE", "STRING"))
 check("  是输出节点且输入取列表", MKImageSelector.OUTPUT_NODE and MKImageSelector.INPUT_IS_LIST)
-check("  输出为列表(仅第1路)", MKImageSelector.OUTPUT_IS_LIST == (True, False))
+check("  输出为列表(仅第1路)", list(MKImageSelector.OUTPUT_IS_LIST) == [True, False])
 check("  分类为 MK节点", MKImageSelector.CATEGORY == "MK节点")
 
 # 路由/事件必须与源包隔离，否则 aiohttp 重复注册会报错
@@ -589,6 +594,97 @@ if pc_loc:
           f"{pc_loc.get('display_name')!r}")
     check("  未配置无效的 options 翻译",
           all("options" not in v for v in pc_loc.get("inputs", {}).values()))
+
+print()
+print("=== 12. 图像对比（MK_ImageCompare）===")
+from Comfyui_MKnode.nodes.image_compare import MKImageCompare
+
+ic_schema = MKImageCompare.GET_SCHEMA()
+print("  node_id     :", ic_schema.node_id)
+print("  inputs      :", [(i.id, type(i).__name__) for i in ic_schema.inputs])
+print("  outputs     :", [(o.id, o.display_name, o.io_type) for o in ic_schema.outputs])
+check("node_id 为 MK_ImageCompare", ic_schema.node_id == "MK_ImageCompare", ic_schema.node_id)
+check("display_name 为 MK-图像对比", ic_schema.display_name == "MK-图像对比", ic_schema.display_name)
+check("分类为 MK节点", ic_schema.category == "MK节点", ic_schema.category)
+check("输入为 image_a / image_b", [i.id for i in ic_schema.inputs] == ["image_a", "image_b"],
+      str([i.id for i in ic_schema.inputs]))
+check("两个输入都是可选", all(getattr(i, "optional", False) for i in ic_schema.inputs))
+check("输出只有 1 个 IMAGE", [(o.id, o.io_type) for o in ic_schema.outputs] == [("image", "IMAGE")],
+      str([(o.id, o.io_type) for o in ic_schema.outputs]))
+check("是输出节点（需要 ui 回传）", bool(ic_schema.is_output_node))
+
+from Comfyui_MKnode.nodes import image_compare as ic_mod
+
+_ic_a = np.random.rand(2, 24, 32, 3).astype(np.float32)
+_ic_b = np.random.rand(1, 24, 32, 3).astype(np.float32)
+# 直接用 torch 张量走真实 save_images 路径
+import torch as _torch
+_ic_a = _torch.from_numpy(_ic_a)
+_ic_b = _torch.from_numpy(_ic_b)
+
+_ic_out = MKImageCompare.execute(image_a=_ic_a, image_b=_ic_b)
+check("图像A 原样透传（同一对象）", _ic_out.result[0] is _ic_a)
+check("批次维度未被改动", tuple(_ic_out.result[0].shape) == tuple(_ic_a.shape))
+check("ui.a_images 数量 = A 的批次", len(_ic_out.ui["a_images"]) == 2, str(_ic_out.ui["a_images"]))
+check("ui.b_images 数量 = B 的批次", len(_ic_out.ui["b_images"]) == 1, str(_ic_out.ui["b_images"]))
+check("图片引用带 type=temp",
+      all(item.get("type") == "temp" and item.get("filename") for item in _ic_out.ui["a_images"]))
+
+_ic_only_b = MKImageCompare.execute(image_a=None, image_b=_ic_b)
+check("只接 B 时输出为空", _ic_only_b.result[0] is None)
+check("只接 B 时 b 仍可预览", len(_ic_only_b.ui["b_images"]) == 1)
+check("只接 B 时 a 为空", _ic_only_b.ui["a_images"] == [])
+
+_ic_none = MKImageCompare.execute()
+check("两个都不接时不报错", _ic_none.result[0] is None and _ic_none.ui == {"a_images": [], "b_images": []})
+
+# 保存失败要降级为「不显示」，不能把整条流程炸掉
+import nodes as _comfy_nodes
+
+_orig_preview_cls = _comfy_nodes.PreviewImage
+
+
+class _BoomPreview:
+    def save_images(self, *args, **kwargs):
+        raise RuntimeError("boom")
+
+
+_comfy_nodes.PreviewImage = _BoomPreview
+try:
+    check("保存失败时降级为空列表", ic_mod._save_preview(_ic_a, "mk.test.boom") == [])
+finally:
+    _comfy_nodes.PreviewImage = _orig_preview_cls
+
+
+# 前端契约：面板挂载点、接口名、交互常量
+def _read(rel):
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), rel), encoding="utf-8") as f:
+        return f.read()
+
+
+ic_js = _read("web/image_compare.js")
+check("前端扩展名带包前缀", 'name: "Comfyui_MKnode.ImageCompare"' in ic_js)
+check("前端只处理 MK_ImageCompare", 'NODE_TYPE = "MK_ImageCompare"' in ic_js)
+check("前端用 addDOMWidget 挂载", "addDOMWidget(" in ic_js)
+check("前端读取 ui.a_images / ui.b_images",
+      "a_images" in ic_js and "b_images" in ic_js)
+check("前端用 clip-path 做分割对比", "clipPath" in ic_js and "inset(0 " in ic_js)
+check("没有画布钩子（Nodes 2.0 不调用）",
+      "onDrawBackground" not in ic_js and "graph_mouse" not in ic_js)
+
+ic_loc = loc_all.get("MK_ImageCompare")
+check("语言包含 MK_ImageCompare", ic_loc is not None)
+if ic_loc:
+    ic_valid = {i.id for i in ic_schema.inputs}
+    check("  语言包输入 id 均合法",
+          set(ic_loc.get("inputs", {})) <= ic_valid,
+          f"多余: {set(ic_loc.get('inputs', {})) - ic_valid}")
+    check("  语言包输出按索引翻译",
+          set(ic_loc.get("outputs", {})) == {"0"},
+          str(sorted(ic_loc.get("outputs", {}))))
+    check("  语言包 display_name 与注册一致",
+          ic_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_ImageCompare"],
+          f"{ic_loc.get('display_name')!r}")
 
 print()
 if fails:

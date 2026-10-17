@@ -1,6 +1,6 @@
 # ComfyUI-MKnode
 
-MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存、提示词拼接、提示词预设管理、图片化提示词大全。
+MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 对比 / 保存、提示词拼接、提示词预设管理、图片化提示词大全。
 
 所有节点都在 **`MK节点`** 分类下。
 
@@ -10,6 +10,7 @@ MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 保存、提�
 | --- | --- |
 | MK-加载图像 | 加载图像，可按目标总像素等比缩放 |
 | MK-图像选择器 | 执行时暂停，手动挑选图像后再继续 |
+| MK-图像对比 | 拖动分割线对比图像A/图像B，并把图像A透传给下游 |
 | MK-图像裁剪 | 按位置与偏移裁剪图像，输出实际裁剪起点坐标 |
 | MK-提示词拼接 | 把多段提示词按分隔符拼成一条，输入端可动态增减 |
 | MK-提示词预设管理 | 带预设库的文本框，可选预设一键填入，并把数字转写成中文 |
@@ -52,6 +53,22 @@ pip install -r ComfyUI-MKnode/requirements.txt
 输出：`选中图像`、`选中索引`（逗号分隔）。
 
 点选图像后按钮会显示已选数量，点「确认选择」继续；点「取消运行」中断整个执行。
+
+候选图 ≤ 4 张时，预览区按**图片原始宽高比**自动排布：横图排成横卡、竖图排成竖卡，同一行基线对齐、整行铺满宽度，图片完整显示不裁切；≥ 5 张时回到小方格 + 滚动。
+
+### MK-图像对比
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 图像A | — | 对比的基准图，也是「图像A」输出的内容 |
+| 图像B | — | 参照图，只用于显示 |
+
+输出：`图像A`（把输入 A 原样透传）。
+
+- 与官方 `Compare Images`（`ImageCompare`）同款交互：执行后两张图叠在节点上，鼠标在预览区左右移动即可拖动分割线，左侧看 A、右侧看 B，拖动范围自动夹在 0.5%～99.5%。
+- 与官方的唯一差别是**多了一个 IMAGE 输出**，可以把 A 图接着往下传（官方节点只有对比、没有输出）。
+- 两张输入都是**可选**的：只接 A 就只显示 A（不裁切、不显示把手）；只接 B 则输出为空、仅作预览。
+- 批量图（同一输入里多张）会在面板顶部出现 `图像A` / `图像B` 的 `‹ 1 / 3 ›` 翻页条，只在对应输入超过 1 张时显示。
 
 ### MK-图像裁剪
 
@@ -156,12 +173,14 @@ pip install -r ComfyUI-MKnode/requirements.txt
 ## 说明
 
 - 图像加载直接复用官方 `LoadImage` 的加载逻辑，保证 pyav / Pillow 两条路径（含动画 WebP 回退、EXIF 旋转、alpha 转遮罩）与上游一致。
-- 图像选择器迁移自 [Comfyui_LG_Tools](https://github.com/LAOGOU-666/Comfyui_LG_Tools) 的 ImageSelector，交互逻辑保持一致，并删除了 `keep_last_selection` 模式。
+- 图像选择器迁移自 [Comfyui_LG_Tools](https://github.com/LAOGOU-666/Comfyui_LG_Tools) 的 ImageSelector，交互逻辑保持一致，并删除了 `keep_last_selection` 模式；已改用 V3 API（`io.ComfyNode`），前端由 canvas 绘制改为 DOM 组件，因此在旧版 LiteGraph 与 Nodes 2.0（Vue 渲染）下都能正常选图。
+- 图像对比对齐官方 `ImageCompare`（`comfy_extras/nodes_image_compare.py`）的实现：同样用 `PreviewImage` 把两批图落成临时文件、以 `ui.a_images / ui.b_images` 回传前端，前端按同款「叠图 + 分割线」交互渲染；差别只在于新增了一个 IMAGE 输出，且前端不复用官方 `imagecompare` widget（那个 widget 只对 `comfyClass === "ImageCompare"` 的节点接线），改为本包自绘的 DOM 组件。
 - 图像裁剪迁移自 [ComfyUI_essentials](https://github.com/cubiq/ComfyUI_essentials) 的 `ImageCrop+`，坐标计算与边界处理逐行保持上游行为。
 - 提示词拼接迁移自 [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) 的 `easy promptConcat`，节点 id 与内部输入 id 保持原样以兼容源包工作流。
 - 提示词预设管理迁移自 ComfyUI-xiaozhuguang 的「小珠光文本框-化神级」，数字转中文引擎逐行保留、未改行为；节点 id、存储路由与前端命名空间已按本包约定改名。
 - 提示词大全由提示词预设管理派生而来：去掉数字转中文与两个下拉控件，分类结构改为多级树、列表改为缩略图网格，并新增缩略图上传（`/mk_prompt_asset`）与配图存储目录（`mk_prompt_assets/`）。
-- 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；图像选择器（交互式输出）、提示词拼接（依赖未声明的动态输入）与提示词预设管理（前端把两个 STRING 控件替换为动态下拉）保留 V1 写法。
+- 新增节点使用 V3 API（`io.ComfyNode` / `io.Schema` / `io.NodeOutput`）；提示词拼接（依赖未声明的动态输入）与提示词预设管理（前端把两个 STRING 控件替换为动态下拉）保留 V1 写法。
+- Nodes 2.0 用 Vue 渲染节点，不会再调用 `onDrawBackground` / `onMouseDown` 等 LiteGraph 画布钩子。本包的前端交互统一用 DOM 组件（`addDOMWidget`）实现，两种渲染模式下行为一致。
 
 ## 自测
 
