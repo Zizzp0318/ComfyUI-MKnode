@@ -7,6 +7,7 @@
 """
 
 from .any_switch import MKAnySwitch
+from .fast_groups import MKFastGroupsBypasser, MKFastGroupsMuter
 from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
@@ -21,6 +22,8 @@ NODE_CLASSES = [
     MKImageSelector,
     MKImageCompare,
     MKAnySwitch,
+    MKFastGroupsMuter,
+    MKFastGroupsBypasser,
     MKPromptConcat,
     MKPromptPreset,
     MKPromptLibrary,

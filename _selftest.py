@@ -807,6 +807,87 @@ if as_loc:
           as_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AnySwitch"],
           f"{as_loc.get('display_name')!r}")
 
+print("=== 14. 禁用多框 / 忽略多框（MK_FastGroups*，V1 空节点）===")
+from Comfyui_MKnode.nodes.fast_groups import (  # noqa: E402
+    MKFastGroupsMuter,
+    MKFastGroupsBypasser,
+)
+
+for cls, node_id, display, off_mode in [
+    (MKFastGroupsMuter, "MK_FastGroupsMuter", "MK-禁用多框", 2),
+    (MKFastGroupsBypasser, "MK_FastGroupsBypasser", "MK-忽略多框", 4),
+]:
+    print(f"  --- {node_id} ---")
+    it = cls.INPUT_TYPES()
+    check(f"  {node_id} 已注册", node_id in pkg.NODE_CLASS_MAPPINGS)
+    check(f"  {node_id} 显示名为 {display}",
+          pkg.NODE_DISPLAY_NAME_MAPPINGS.get(node_id) == display,
+          pkg.NODE_DISPLAY_NAME_MAPPINGS.get(node_id))
+    check(f"  {node_id} 无输入", it["required"] == {}, str(it["required"]))
+    check(f"  {node_id} 无输出（纯 UI 节点）", cls.RETURN_TYPES == (), str(cls.RETURN_TYPES))
+    check(f"  {node_id} 不是输出节点", not getattr(cls, "OUTPUT_NODE", False))
+    check(f"  {node_id} 分类为 MK节点", cls.CATEGORY == "MK节点")
+    check(f"  {node_id} noop 返回空元组", cls().noop() == ())
+    check(f"  {node_id} 关闭模式为 {off_mode}", cls.MODE_OFF == off_mode, str(cls.MODE_OFF))
+    check(f"  {node_id} 开启模式为 0（ALWAYS）", cls.MODE_ON == 0, str(cls.MODE_ON))
+
+# 空节点混在真实 prompt 里不能影响校验
+_prev_maps2 = (dict(_comfy_nodes.NODE_CLASS_MAPPINGS), dict(_comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS))
+try:
+    _comfy_nodes.NODE_CLASS_MAPPINGS.update(pkg.NODE_CLASS_MAPPINGS)
+    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(pkg.NODE_DISPLAY_NAME_MAPPINGS)
+    _fg_prompt = {
+        "1": {"class_type": "EmptyImage",
+              "inputs": {"width": 64, "height": 64, "batch_size": 1, "color": 0}},
+        "2": {"class_type": "MK_FastGroupsMuter", "inputs": {}},
+        "3": {"class_type": "MK_FastGroupsBypasser", "inputs": {}},
+        "4": {"class_type": "MK_SaveImage",
+              "inputs": {"images": ["1", 0], "filename_prefix": "mk_selftest",
+                         "image_format": "PNG", "quality": 95,
+                         "save_metadata": False, "preview_only": True}},
+    }
+    _fg_ok, _fg_err, _fg_partial, _ = asyncio.run(execution.validate_prompt("selftest_fg", _fg_prompt, None))
+finally:
+    _comfy_nodes.NODE_CLASS_MAPPINGS.clear()
+    _comfy_nodes.NODE_CLASS_MAPPINGS.update(_prev_maps2[0])
+    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.clear()
+    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(_prev_maps2[1])
+
+print("  validate_prompt ->", _fg_ok, _fg_err)
+check("  空 UI 节点混在 prompt 中校验通过", _fg_ok is True, str(_fg_err))
+check("  空 UI 节点不进入执行列表", "2" not in _fg_partial and "3" not in _fg_partial, str(_fg_partial))
+
+# 前端契约
+fg_js = _read("web/fast_groups.js")
+check("  前端扩展名带包前缀", 'name: "Comfyui_MKnode.FastGroups"' in fg_js)
+check("  同时处理两个节点类型",
+      "MK_FastGroupsMuter: {" in fg_js and "MK_FastGroupsBypasser: {" in fg_js)
+check("  用 addDOMWidget 挂面板（Nodes 2.0 才不空白）", "addDOMWidget(" in fg_js)
+check("  禁用用 mode=2、忽略用 mode=4",
+      "MODE_NEVER = 2" in fg_js and "MODE_BYPASS = 4" in fg_js)
+check("  无画布绘制/命中钩子",
+      all(k not in fg_js for k in ("onDrawBackground", "graph_mouse", "isInsideRectangle")))
+check("  按分组行的 DOM 按钮切换", 'className = "mk-fg-switch"' in fg_js)
+check("  有轮询刷新（分组与状态会变）", "setInterval(" in fg_js and "mkFgRefresh" in fg_js)
+check("  支持宽度自适应（面板高度跟节点）", "mkFgSyncPanelHeight" in fg_js)
+check("  覆盖 onConfigure 且调用基类",
+      "const onConfigure = nodeType.prototype.onConfigure;" in fg_js)
+check("  属性键与上游一致",
+      all(f'{k}:' in fg_js for k in ("matchColors", "matchTitle", "showNav", "showAllGraphs",
+                                     "sort", "customSortAlphabet", "toggleRestriction")))
+check("  不引用 rgthree 的任何文件", "rgthree" not in fg_js.lower().replace("rgthree-comfy", ""))
+
+for node_id in ("MK_FastGroupsMuter", "MK_FastGroupsBypasser"):
+    fg_loc = loc_all.get(node_id)
+    check(f"  语言包含 {node_id}", fg_loc is not None)
+    if fg_loc:
+        check(f"    {node_id} 不翻译不存在的输入输出",
+              not fg_loc.get("inputs") and not fg_loc.get("outputs"),
+              f"{fg_loc.get('inputs')}/{fg_loc.get('outputs')}")
+        check(f"    {node_id} display_name 与注册一致",
+              fg_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS[node_id],
+              f"{fg_loc.get('display_name')!r}")
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")

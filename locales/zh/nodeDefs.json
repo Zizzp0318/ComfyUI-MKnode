@@ -116,5 +116,17 @@
         "tooltip": "第一个非空输入的值；全为空时输出空。"
       }
     }
+  },
+  "MK_FastGroupsMuter": {
+    "display_name": "MK-禁用多框",
+    "description": "把当前工作流里的所有分组列成开关，点一下即可把该分组内的节点整体禁用（Mute）或恢复启用。支持按位置/名称排序、按标题或颜色过滤、最多一个/始终一个等开关规则。",
+    "inputs": {},
+    "outputs": {}
+  },
+  "MK_FastGroupsBypasser": {
+    "display_name": "MK-忽略多框",
+    "description": "把当前工作流里的所有分组列成开关，点一下即可把该分组内的节点整体忽略（Bypass）或恢复启用。与禁用不同，被忽略的节点会把输入原样透传给输出。",
+    "inputs": {},
+    "outputs": {}
   }
 }
