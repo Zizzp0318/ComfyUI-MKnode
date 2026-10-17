@@ -1,4 +1,4 @@
-"""MK-图像选择器
+"""MK-图像选择器（Node API V3）
 
 迁移自 Comfyui_LG_Tools 的 ImageSelector 节点（原分类 🎈LAOGOU/Image）。
 
@@ -16,6 +16,18 @@
 - 删除 keep_last_selection 模式（原「自动使用上次选择」），
   连同其分支与配套的 last_selection 存储一起移除
 
+API 版本（V1 -> V3）：
+- 节点定义由 INPUT_TYPES / RETURN_TYPES 改为 io.ComfyNode + define_schema。
+- 对应关系：
+    INPUT_IS_LIST = True            -> io.Schema(is_input_list=True)
+    OUTPUT_NODE = True              -> io.Schema(is_output_node=True)
+    OUTPUT_IS_LIST = (True, False)  -> 输出逐个声明 io.Image.Output(..., is_output_list=True)
+    hidden = {prompt, unique_id, extra_pnginfo} -> io.Hidden.*，执行时用 cls.hidden.* 读取
+    IS_CHANGED                      -> fingerprint_inputs
+    return {"result": (...)}        -> return io.NodeOutput(...)
+- 节点 id、输入 id、输出顺序与选项值均未变化，旧工作流可直接打开；
+  前端通过 nodeData.name === "MK_ImageSelector" 匹配，也不受影响。
+
 中文显示名由 locales/zh/nodeDefs.json 提供，内部 id 与选项值保持英文，
 以免影响 API 调用与已保存的工作流 JSON。
 """
@@ -30,6 +42,7 @@ from nodes import PreviewImage
 from server import PromptServer
 
 import comfy.model_management
+from comfy_api.latest import io
 
 ROUTE_SELECT = "/mk_image_selector/select"
 EVENT_UPDATE = "mk_image_selector_update"
@@ -37,6 +50,12 @@ EVENT_UPDATE = "mk_image_selector_update"
 # 该模式已按需求删除，此事件当前不再发送，但保留常量与前端监听器——
 # 交互链路无法自动化验证，此处刻意减少改动面，确认无用后可一并清理。
 EVENT_SELECTION = "mk_image_selector_selection"
+
+MODE_ALWAYS_PAUSE = "always_pause"
+MODE_PASSTHROUGH = "passthrough"
+MODE_OPTIONS = [MODE_ALWAYS_PAUSE, MODE_PASSTHROUGH]
+
+_SESSION_KEYS = ("event", "selected_indices", "images", "total_count", "cancelled")
 
 
 class ImageSelectorCancelled(Exception):
@@ -50,65 +69,118 @@ def get_selector_storage():
     return PromptServer.instance._mk_selector_node_data
 
 
-class MKImageSelector(PreviewImage):
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "images": ("IMAGE",),
-                "mode": (["always_pause", "passthrough"], {"default": "always_pause"}),
-            },
-            "hidden": {
-                "prompt": "PROMPT",
-                "unique_id": "UNIQUE_ID",
-                "extra_pnginfo": "EXTRA_PNGINFO",
-            },
-        }
+def _cleanup_session_data(node_id):
+    """清理会话数据。
 
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("selected_images", "selected_indices")
-    FUNCTION = "select_image"
-    CATEGORY = "MK节点"
-    OUTPUT_NODE = True
-    OUTPUT_IS_LIST = (True, False)
-    INPUT_IS_LIST = True
+    与源实现一致：只删会话字段，不删 node_id 这个空条目——
+    execute 的等待循环依赖 `node_id in node_data` 作为存活判断。
+    """
+    node_data = get_selector_storage()
+    if node_id in node_data:
+        for key in _SESSION_KEYS:
+            if key in node_data[node_id]:
+                del node_data[node_id][key]
+
+
+def _flatten_images(images):
+    """把上游传入的 IMAGE 批次拆成单张 (1, H, W, C) 列表。
+
+    与源实现逐行等价：列表里的非 Tensor 元素被静默跳过，
+    非法维度/类型抛 ValueError（由 execute 的兜底分支接管）。
+    """
+    image_list = []
+    if isinstance(images, list):
+        for img in images:
+            if isinstance(img, torch.Tensor):
+                if len(img.shape) == 4:
+                    for i in range(img.shape[0]):
+                        image_list.append(img[i:i + 1])
+                elif len(img.shape) == 3:
+                    image_list.append(img.unsqueeze(0))
+    elif isinstance(images, torch.Tensor):
+        if len(images.shape) == 4:
+            for i in range(images.shape[0]):
+                image_list.append(images[i:i + 1])
+        elif len(images.shape) == 3:
+            image_list.append(images.unsqueeze(0))
+        else:
+            raise ValueError(f"不支持的图像维度: {images.shape}")
+    else:
+        raise ValueError(f"不支持的输入类型: {type(images)}")
+    return image_list
+
+
+class MKImageSelector(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="MK_ImageSelector",
+            display_name="MK-图像选择器",
+            category="MK节点",
+            description="把上游图像拆成多张，执行时暂停并在节点上点选，返回选中的图像与索引。",
+            search_aliases=[
+                "image selector", "pick image", "choose image", "select image",
+                "图像选择", "选图", "选择图像",
+            ],
+            inputs=[
+                io.Image.Input(
+                    "images",
+                    display_name="图像",
+                    tooltip="待选择的图像。多张时会平铺显示在节点上，点击即可选中。",
+                ),
+                io.Combo.Input(
+                    "mode",
+                    display_name="模式",
+                    options=MODE_OPTIONS,
+                    default=MODE_ALWAYS_PAUSE,
+                    tooltip="等待选择：执行时暂停，等你在节点上点选后点确认继续。"
+                            "自动通过：不暂停，直接放行全部图像。",
+                ),
+            ],
+            outputs=[
+                io.Image.Output(
+                    "selected_images",
+                    display_name="选中图像",
+                    tooltip="被选中的图像",
+                    is_output_list=True,
+                ),
+                io.String.Output(
+                    "selected_indices",
+                    display_name="选中索引",
+                    tooltip="被选中的图像序号，多个以英文逗号分隔",
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.unique_id, io.Hidden.extra_pnginfo],
+            is_input_list=True,
+            is_output_node=True,
+        )
 
     @classmethod
-    def IS_CHANGED(cls, images, **kwargs):
+    def fingerprint_inputs(cls, images, mode):
+        # 与原 IS_CHANGED 一致：始终视为已变化，保证每次执行都停下来等选择。
         return float(time.time())
 
-    def select_image(self, images, mode, prompt=None, unique_id=None, extra_pnginfo=None):
+    @classmethod
+    def execute(cls, images, mode):
+        node_id = ""
+        image_list = []
+
         try:
-            node_id = str(unique_id[0]) if isinstance(unique_id, list) else str(unique_id)
+            node_id = str(cls.hidden.unique_id)
             actual_mode = mode[0] if isinstance(mode, list) else mode
+            prompt = cls.hidden.prompt
 
             # 获取共享存储空间
             node_data = get_selector_storage()
 
-            image_list = []
-            if isinstance(images, list):
-                for img in images:
-                    if isinstance(img, torch.Tensor):
-                        if len(img.shape) == 4:
-                            for i in range(img.shape[0]):
-                                image_list.append(img[i:i + 1])
-                        elif len(img.shape) == 3:
-                            image_list.append(img.unsqueeze(0))
-            elif isinstance(images, torch.Tensor):
-                if len(images.shape) == 4:
-                    for i in range(images.shape[0]):
-                        image_list.append(images[i:i + 1])
-                elif len(images.shape) == 3:
-                    image_list.append(images.unsqueeze(0))
-                else:
-                    raise ValueError(f"不支持的图像维度: {images.shape}")
-            else:
-                raise ValueError(f"不支持的输入类型: {type(images)}")
+            image_list = _flatten_images(images)
+            total_count = len(image_list)
 
             preview_images = []
-            for i, img in enumerate(image_list):
+            saver = PreviewImage()
+            for img in image_list:
                 try:
-                    result = self.save_images(images=img, prompt=prompt)
+                    result = saver.save_images(images=img, prompt=prompt)
                     if 'ui' in result and 'images' in result['ui']:
                         preview_images.extend(result['ui']['images'])
                 except Exception:
@@ -122,10 +194,10 @@ class MKImageSelector(PreviewImage):
             except Exception:
                 pass
 
-            if actual_mode == "passthrough":
-                self.cleanup_session_data(node_id)
-                all_indices = ','.join(str(i) for i in range(len(image_list)))
-                return {"result": (image_list, all_indices)}
+            if actual_mode == MODE_PASSTHROUGH:
+                _cleanup_session_data(node_id)
+                all_indices = ','.join(str(i) for i in range(total_count))
+                return io.NodeOutput(image_list, all_indices)
 
             if node_id in node_data:
                 del node_data[node_id]
@@ -135,14 +207,14 @@ class MKImageSelector(PreviewImage):
                 "event": event,
                 "selected_indices": None,
                 "images": image_list,
-                "total_count": len(image_list),
+                "total_count": total_count,
                 "cancelled": False,
             }
 
             while node_id in node_data:
                 node_info = node_data[node_id]
                 if node_info.get("cancelled", False):
-                    self.cleanup_session_data(node_id)
+                    _cleanup_session_data(node_id)
                     raise ImageSelectorCancelled("用户取消选择")
 
                 if "selected_indices" in node_info and node_info["selected_indices"] is not None:
@@ -155,41 +227,39 @@ class MKImageSelector(PreviewImage):
                 selected_indices = node_info.get("selected_indices")
 
                 if selected_indices is not None and len(selected_indices) > 0:
-                    valid_indices = [idx for idx in selected_indices if 0 <= idx < len(image_list)]
+                    valid_indices = [idx for idx in selected_indices if 0 <= idx < total_count]
                     if valid_indices:
                         selected_images = [image_list[idx] for idx in valid_indices]
 
-                        self.cleanup_session_data(node_id)
+                        _cleanup_session_data(node_id)
                         indices_str = ','.join(str(i) for i in valid_indices)
-                        return {"result": (selected_images, indices_str)}
+                        return io.NodeOutput(selected_images, indices_str)
                     else:
-                        self.cleanup_session_data(node_id)
-                        return {"result": ([image_list[0]] if len(image_list) > 0 else [], "0" if len(image_list) > 0 else "")}
+                        _cleanup_session_data(node_id)
+                        return io.NodeOutput(
+                            [image_list[0]] if total_count > 0 else [],
+                            "0" if total_count > 0 else "",
+                        )
                 else:
-                    self.cleanup_session_data(node_id)
-                    return {"result": ([image_list[0]] if len(image_list) > 0 else [], "0" if len(image_list) > 0 else "")}
+                    _cleanup_session_data(node_id)
+                    return io.NodeOutput(
+                        [image_list[0]] if total_count > 0 else [],
+                        "0" if total_count > 0 else "",
+                    )
             else:
-                return {"result": ([image_list[0]] if len(image_list) > 0 else [], "0" if len(image_list) > 0 else "")}
+                return io.NodeOutput(
+                    [image_list[0]] if total_count > 0 else [],
+                    "0" if total_count > 0 else "",
+                )
 
         except ImageSelectorCancelled:
             raise comfy.model_management.InterruptProcessingException()
         except Exception:
-            node_data = get_selector_storage()
-            if node_id in node_data:
-                self.cleanup_session_data(node_id)
-            if 'image_list' in locals() and len(image_list) > 0:
-                return {"result": ([image_list[0]], "0")}
+            _cleanup_session_data(node_id)
+            if image_list:
+                return io.NodeOutput([image_list[0]], "0")
             else:
-                return {"result": ([], "")}
-
-    def cleanup_session_data(self, node_id):
-        """清理会话数据"""
-        node_data = get_selector_storage()
-        if node_id in node_data:
-            session_keys = ["event", "selected_indices", "images", "total_count", "cancelled"]
-            for key in session_keys:
-                if key in node_data[node_id]:
-                    del node_data[node_id][key]
+                return io.NodeOutput([], "")
 
 
 def _register_route(handler):
@@ -230,7 +300,10 @@ async def select_image_handler(request):
                 node_info["cancelled"] = True
                 node_info["selected_indices"] = []
             elif action == "select" and isinstance(selected_indices, list):
-                valid_indices = [idx for idx in selected_indices if isinstance(idx, int) and 0 <= idx < node_info["total_count"]]
+                valid_indices = [
+                    idx for idx in selected_indices
+                    if isinstance(idx, int) and 0 <= idx < node_info["total_count"]
+                ]
                 if valid_indices:
                     node_info["selected_indices"] = valid_indices
                     node_info["cancelled"] = False
