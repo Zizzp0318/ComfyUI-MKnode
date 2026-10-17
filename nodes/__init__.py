@@ -6,6 +6,7 @@
 3. 把节点类加进 NODE_CLASSES
 """
 
+from .any_switch import MKAnySwitch
 from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
@@ -19,6 +20,7 @@ NODE_CLASSES = [
     MKLoadImage,
     MKImageSelector,
     MKImageCompare,
+    MKAnySwitch,
     MKPromptConcat,
     MKPromptPreset,
     MKPromptLibrary,
@@ -31,6 +33,7 @@ __all__ = [
     "MKLoadImage",
     "MKImageSelector",
     "MKImageCompare",
+    "MKAnySwitch",
     "MKPromptConcat",
     "MKPromptPreset",
     "MKPromptLibrary",

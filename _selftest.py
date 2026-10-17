@@ -686,6 +686,127 @@ if ic_loc:
           ic_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_ImageCompare"],
           f"{ic_loc.get('display_name')!r}")
 
+print("=== 13. 任意切换（MK_AnySwitch，V1）===")
+from Comfyui_MKnode.nodes.any_switch import (
+    MKAnySwitch,
+    AnyType,
+    any_type,
+    is_none,
+    input_name,
+    INPUT_PREFIX,
+    MIN_INPUTS,
+    MAX_INPUTS,
+)
+
+as_it = MKAnySwitch.INPUT_TYPES()
+print("  required :", dict(as_it["required"]))
+print("  optional 类型:", type(as_it["optional"]).__name__)
+print("  RETURN_TYPES/NAMES :", MKAnySwitch.RETURN_TYPES, MKAnySwitch.RETURN_NAMES)
+print("  FUNCTION/CATEGORY  :", MKAnySwitch.FUNCTION, MKAnySwitch.CATEGORY)
+
+check("  已注册", "MK_AnySwitch" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-任意切换",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AnySwitch"] == "MK-任意切换",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_AnySwitch"))
+check("  required 为空（输入全靠前端动态添加）", as_it["required"] == {})
+check("  optional 是 FlexibleOptionalInputType", isinstance(as_it["optional"], dict) and "any_05" in as_it["optional"])
+check("  未声明输入取到 ('*',)", as_it["optional"]["any_05"] == ("*",), str(as_it["optional"]["any_05"]))
+check("  任意怪键也被接受", as_it["optional"]["不是输入名"] == ("*",))
+check("  返回单个 AnyType", MKAnySwitch.RETURN_TYPES == (any_type,) and isinstance(any_type, AnyType))
+check("  AnyType 与任何类型比对都不相等", (any_type != "IMAGE") is False)
+check("  输出名为 任意", MKAnySwitch.RETURN_NAMES == ("任意",))
+check("  分类为 MK节点", MKAnySwitch.CATEGORY == "MK节点")
+check("  非输出节点", not getattr(MKAnySwitch, "OUTPUT_NODE", False))
+check("  输入 id 补零", input_name(1) == "any_01" and input_name(12) == "any_12", input_name(12))
+check("  输入前缀与前端约定一致", INPUT_PREFIX == "any_")
+check("  端数上下限合理", MIN_INPUTS >= 1 and MAX_INPUTS >= MIN_INPUTS,
+      f"{MIN_INPUTS}/{MAX_INPUTS}")
+
+# is_none：None 算空；0 / 空串 / 普通 dict 不算空；全空的 rgthree CONTEXT 算空
+for label, value, expect in [
+    ("None", None, True),
+    ("0", 0, False),
+    ("空字符串", "", False),
+    ("空列表", [], False),
+    ("空 context", {"model": None, "clip": None}, True),
+    ("有内容 context", {"model": "m", "clip": None}, False),
+    ("普通 dict", {"a": None}, False),
+]:
+    check(f"  is_none {label}", is_none(value) is expect, str(value))
+
+# switch：按顺序取第一个非空
+node_as = MKAnySwitch()
+as_cases = [
+    ("全空", {}, None),
+    ("单个", {"any_01": "a"}, "a"),
+    ("跳过 None", {"any_01": None, "any_02": "b"}, "b"),
+    ("跳过空 context", {"any_01": {"model": None, "clip": None}, "any_02": 7}, 7),
+    ("0 先命中（不被当空）", {"any_01": 0, "any_02": "b"}, 0),
+    ("空字符串先命中", {"any_01": "", "any_02": "b"}, ""),
+    ("字典顺序即优先级", {"any_01": "x", "any_02": "y"}, "x"),
+    ("非 any_ 前缀忽略", {"foo": "z"}, None),
+    ("任意对象原样透传", {"any_03": ("T",)}, ("T",)),
+]
+for label, kw, expect in as_cases:
+    got = node_as.switch(**kw)[0]
+    print(f"  {label:22s} -> {got!r}")
+    check(f"  switch {label}", got == expect or got is expect, f"got {got!r} 期望 {expect!r}")
+
+# ComfyUI 真实校验路径：未声明的 any_NN 不会被当成「未知输入」拦下
+import asyncio  # noqa: E402
+import execution  # noqa: E402
+import nodes as _comfy_nodes  # noqa: E402
+
+_prev_maps = (dict(_comfy_nodes.NODE_CLASS_MAPPINGS), dict(_comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS))
+try:
+    _comfy_nodes.NODE_CLASS_MAPPINGS.update(pkg.NODE_CLASS_MAPPINGS)
+    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(pkg.NODE_DISPLAY_NAME_MAPPINGS)
+    _as_prompt = {
+        "1": {"class_type": "MK_PromptConcat", "inputs": {"分隔符": " | "}},
+        "2": {"class_type": "MK_PromptConcat", "inputs": {"分隔符": " - "}},
+        "3": {"class_type": "MK_AnySwitch",
+              "inputs": {"any_01": ["1", 0], "any_02": ["2", 0], "any_07": ["1", 0]}},
+        "4": {"class_type": "MK_SaveImage",
+              "inputs": {"images": ["3", 0], "filename_prefix": "mk_selftest",
+                         "image_format": "PNG", "quality": 95,
+                         "save_metadata": False, "preview_only": True}},
+    }
+    _as_ok, _as_err, _as_partial, _ = asyncio.run(execution.validate_prompt("selftest", _as_prompt, None))
+finally:
+    _comfy_nodes.NODE_CLASS_MAPPINGS.clear()
+    _comfy_nodes.NODE_CLASS_MAPPINGS.update(_prev_maps[0])
+    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.clear()
+    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(_prev_maps[1])
+
+print("  validate_prompt ->", _as_ok, _as_err)
+check("  含未声明动态输入的 prompt 通过校验", _as_ok is True, str(_as_err))
+
+# 前端契约
+as_js = _read("web/any_switch.js")
+check("  前端扩展名带包前缀", 'name: "Comfyui_MKnode.AnySwitch"' in as_js)
+check("  前端只处理 MK_AnySwitch", 'NODE_TYPE = "MK_AnySwitch"' in as_js)
+check("  前端输入前缀与后端一致", f'INPUT_PREFIX = "{INPUT_PREFIX}"' in as_js)
+check(f"  前端下限与后端一致（{MIN_INPUTS}）", f"MIN_INPUTS = {MIN_INPUTS}" in as_js)
+check(f"  前端上限与后端一致（{MAX_INPUTS}）", f"MAX_INPUTS = {MAX_INPUTS}" in as_js)
+check("  用 addInput 动态加槽", "this.addInput(" in as_js)
+check("  加载工作流后也会收敛输入端", "onConfigure" in as_js)
+check("  连线变化后收敛", "onConnectionsChange" in as_js)
+check("  无画布钩子（Nodes 2.0 不调用）",
+      all(k not in as_js.replace("// 不碰任何 canvas 绘制钩子（onDrawBackground / onMouseDown / graph_mouse 等）。", "")
+          for k in ("onDrawBackground", "graph_mouse", "onMouseDown")))
+check("  类型跟随不读本节点槽位（断线能回到 *）", "typeUpstream" in as_js and "slotType(node, dir" not in as_js)
+
+as_loc = loc_all.get("MK_AnySwitch")
+check("  语言包含 MK_AnySwitch", as_loc is not None)
+if as_loc:
+    check("  语言包不翻译动态输入（避免死键）",
+          not as_loc.get("inputs"), str(as_loc.get("inputs")))
+    check("  语言包输出按索引翻译", set(as_loc.get("outputs", {})) == {"0"},
+          str(sorted(as_loc.get("outputs", {}))))
+    check("  语言包 display_name 与注册一致",
+          as_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AnySwitch"],
+          f"{as_loc.get('display_name')!r}")
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")
