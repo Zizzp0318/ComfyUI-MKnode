@@ -872,6 +872,14 @@ check("  有轮询刷新（分组与状态会变）", "setInterval(" in fg_js an
 check("  支持宽度自适应（面板高度跟节点）", "mkFgSyncPanelHeight" in fg_js)
 check("  覆盖 onConfigure 且调用基类",
       "const onConfigure = nodeType.prototype.onConfigure;" in fg_js)
+# 回归：boundingRect 只在「画布画到该节点的那一帧」才更新，切工作流/滚出可视区后会变 [0,0,0,0]。
+# 必须用 measure() 现算，否则所有分组都算不出成员（面板全灰、点了没反应）。
+check("  节点包围盒用 measure() 现算（不依赖每帧缓存）",
+      "typeof node.measure === \"function\"" in fg_js and "node.measure(out, app.canvas?.ctx)" in fg_js)
+check("  分组包围盒优先 getBounding（同步布局 store）",
+      "typeof group?.getBounding === \"function\"" in fg_js)
+check("  面板版本标记存在（便于确认脚本已刷新）",
+      'PANEL_VERSION = "v2"' in fg_js)
 check("  属性键与上游一致",
       all(f'{k}:' in fg_js for k in ("matchColors", "matchTitle", "showNav", "showAllGraphs",
                                      "sort", "customSortAlphabet", "toggleRestriction")))

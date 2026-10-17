@@ -18,6 +18,9 @@ import { app } from "../../scripts/app.js";
 
 const STYLE_ID = "mk-fg-style";
 
+// 面板版本：v2 = 修掉「切工作流后分组算不出成员（全灰、点了没反应）」
+const PANEL_VERSION = "v2";
+
 // LiteGraph 的节点模式常量
 const MODE_ON = 0; // ALWAYS
 const MODE_NEVER = 2; // 禁用（Mute）
@@ -239,31 +242,62 @@ function nodesOfGroups(graph) {
     return graph?._groups || graph?.groups || [];
 }
 
-/** 节点包围盒 [x, y, w, h]；老版本没有 getBounding 时退回 pos/size */
+/**
+ * 节点包围盒 [x, y, w, h]。
+ *
+ * **这里不能用 `node.getBounding()`**：它读的是 `boundingRect`，而 `boundingRect`
+ * 只在「画布真正绘制到该节点的那一帧」才由 `measure()` 更新；节点不在可视区、
+ * 或前端切到别的工作流标签再切回来时，它还是初始的 `[0,0,0,0]`。
+ * 一旦所有节点都算出 0 尺寸的框，任何分组都算不出成员——面板会整片变灰，
+ * 点开关也不会有任何反应（进一次子图再退出来触发重绘才恢复）。
+ *
+ * `measure()` 不依赖渲染，直接用 pos/size 现算，任何时候都准。
+ */
 function boundingOf(node) {
+    if (node && typeof node.measure === "function") {
+        const out = [0, 0, 0, 0];
+        try {
+            node.measure(out, app.canvas?.ctx);
+            if (out.every((v) => Number.isFinite(v)) && (out[2] > 0 || out[3] > 0)) return out;
+        } catch (e) {
+            /* 忽略：退回 pos/size */
+        }
+    }
+    // 老前端没有 measure 时退回 getBounding，最后退回 pos/size
     try {
-        if (typeof node.getBounding === "function") {
+        if (typeof node?.getBounding === "function") {
             const b = node.getBounding();
-            if (Array.isArray(b) || ArrayBuffer.isView(b)) {
-                const arr = [Number(b[0]), Number(b[1]), Number(b[2]), Number(b[3])];
-                if (arr.every((v) => Number.isFinite(v))) return arr;
-            }
+            const arr = [Number(b?.[0]), Number(b?.[1]), Number(b?.[2]), Number(b?.[3])];
+            if (arr.every((v) => Number.isFinite(v)) && (arr[2] > 0 || arr[3] > 0)) return arr;
         }
     } catch (e) {
-        /* 忽略：退回 pos/size */
+        /* 忽略 */
     }
-    const pos = node.pos || [0, 0];
-    const size = node.size || [0, 0];
+    const pos = node?.pos || [0, 0];
+    const size = node?.size || [0, 0];
     return [Number(pos[0]) || 0, Number(pos[1]) || 0, Number(size[0]) || 0, Number(size[1]) || 0];
 }
 
 /** 分组包围盒；_bounding 可能是数组，也可能是 {0,1,2,3} 类对象 */
 function boundingOfGroup(group) {
+    // 优先 getBounding()：新版 litegraph 的 _bounding 是布局 store 的视图，
+    // 切工作流后要先同步一次才拿到当前值
+    try {
+        if (typeof group?.getBounding === "function") {
+            const b = group.getBounding();
+            if (b) {
+                const arr = [Number(b[0]), Number(b[1]), Number(b[2] ?? b.width), Number(b[3] ?? b.height)];
+                if (arr.every((v) => Number.isFinite(v)) && (arr[2] > 0 || arr[3] > 0)) return arr;
+            }
+        }
+    } catch (e) {
+        /* 忽略：继续读字段 */
+    }
     const raw = group?._bounding || group?.bounding || group?._size;
     if (!raw) {
         const pos = group?.pos || group?._pos || [0, 0];
         const size = group?.size || group?._size || [0, 0];
-        return [pos[0] || 0, pos[1] || 0, size[0] || 0, size[1] || 0];
+        return [Number(pos[0]) || 0, Number(pos[1]) || 0, Number(size[0]) || 0, Number(size[1]) || 0];
     }
     const w = raw[2] ?? raw.width ?? 0;
     const h = raw[3] ?? raw.height ?? 0;
@@ -407,6 +441,11 @@ function stopPollingIfIdle() {
     if (activeNodes.size || !pollTimer) return;
     clearInterval(pollTimer);
     pollTimer = null;
+}
+
+// 便于确认前端脚本已刷新（浏览器缓存旧文件时不会打印这一行）
+if (typeof console !== "undefined") {
+    console.info(`[MK] MK-禁用多框 / MK-忽略多框 已加载（分组面板 ${PANEL_VERSION}）`);
 }
 
 app.registerExtension({
