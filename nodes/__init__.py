@@ -12,6 +12,7 @@ from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
 from .load_image import MKLoadImage
+from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
 from .prompt_library import MKPromptLibrary
 from .prompt_preset import MKPromptPreset
@@ -28,6 +29,7 @@ NODE_CLASSES = [
     MKPromptPreset,
     MKPromptLibrary,
     MKImageCrop,
+    MKLoraLoaderModelOnly,
     MKSaveImage,
 ]
 
@@ -37,9 +39,12 @@ __all__ = [
     "MKImageSelector",
     "MKImageCompare",
     "MKAnySwitch",
+    "MKFastGroupsMuter",
+    "MKFastGroupsBypasser",
     "MKPromptConcat",
     "MKPromptPreset",
     "MKPromptLibrary",
     "MKImageCrop",
+    "MKLoraLoaderModelOnly",
     "MKSaveImage",
 ]

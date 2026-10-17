@@ -128,5 +128,29 @@
     "description": "把当前工作流里的所有分组列成开关，点一下即可把该分组内的节点整体忽略（Bypass）或恢复启用。与禁用不同，被忽略的节点会把输入原样透传给输出。",
     "inputs": {},
     "outputs": {}
+  },
+  "MK_LoraLoaderModelOnly": {
+    "display_name": "MK-Lora加载器",
+    "description": "给扩散模型加载 LoRA，只影响模型、不碰 CLIP。「LoRA」选「无」时不加载任何 LoRA，把输入模型原样输出，可用于做可选开关式 LoRA。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要叠加 LoRA 的扩散模型。"
+      },
+      "lora_name": {
+        "name": "LoRA",
+        "tooltip": "要加载的 LoRA 文件。选「无」则不加载任何 LoRA，模型原样输出。"
+      },
+      "strength_model": {
+        "name": "模型强度",
+        "tooltip": "LoRA 对模型的影响强度，可以为负数；为 0 时同样等于不加载。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "加载了 LoRA 的模型；选「无」时就是输入的模型本身。"
+      }
+    }
   }
 }

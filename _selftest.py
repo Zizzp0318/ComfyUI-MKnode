@@ -888,6 +888,68 @@ for node_id in ("MK_FastGroupsMuter", "MK_FastGroupsBypasser"):
               fg_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS[node_id],
               f"{fg_loc.get('display_name')!r}")
 
+print("=== 15. Lora加载器（MK_LoraLoaderModelOnly）===")
+from Comfyui_MKnode.nodes.lora_loader import MKLoraLoaderModelOnly, NONE_OPTION  # noqa: E402
+
+lo_it = MKLoraLoaderModelOnly.INPUT_TYPES()
+lo_options = lo_it["required"]["lora_name"][0]
+print("  required :", list(lo_it["required"]))
+print("  LoRA 选项:", lo_options[:5], f"（共 {len(lo_options)} 个）")
+print("  RETURN_TYPES/NAMES :", MKLoraLoaderModelOnly.RETURN_TYPES, MKLoraLoaderModelOnly.RETURN_NAMES)
+
+check("  已注册", "MK_LoraLoaderModelOnly" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-Lora加载器",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_LoraLoaderModelOnly") == "MK-Lora加载器",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_LoraLoaderModelOnly"))
+check("  「无」排在第一位", lo_options and lo_options[0] == NONE_OPTION, str(lo_options[:2]))
+check("  「无」只有一项（不重复）", lo_options.count(NONE_OPTION) == 1, str(lo_options[:3]))
+check("  输入为 model/lora_name/strength_model",
+      list(lo_it["required"]) == ["model", "lora_name", "strength_model"],
+      str(list(lo_it["required"])))
+check("  强度范围与官方一致（-100~100，默认 1.0，步长 0.01）",
+      (lo_it["required"]["strength_model"][1]["min"],
+       lo_it["required"]["strength_model"][1]["max"],
+       lo_it["required"]["strength_model"][1]["default"],
+       lo_it["required"]["strength_model"][1]["step"]) == (-100.0, 100.0, 1.0, 0.01),
+      str(lo_it["required"]["strength_model"][1]))
+check("  单输出 MODEL", MKLoraLoaderModelOnly.RETURN_TYPES == ("MODEL",))
+check("  输出名为 模型", MKLoraLoaderModelOnly.RETURN_NAMES == ("模型",))
+check("  分类为 MK节点", MKLoraLoaderModelOnly.CATEGORY == "MK节点")
+check("  非输出节点", not getattr(MKLoraLoaderModelOnly, "OUTPUT_NODE", False))
+
+# 选「无」：不加载、不碰文件系统、原样返回
+lo_node = MKLoraLoaderModelOnly()
+lo_model = object()
+lo_out = lo_node.load_lora_model_only(lo_model, NONE_OPTION, 1.0)
+check("  选「无」原样返回同一个对象", lo_out[0] is lo_model)
+check("  选「无」后没有缓存任何 LoRA", lo_node.loaded_lora is None)
+check("  空字符串也当作「无」", lo_node.load_lora_model_only(lo_model, "", 1.0)[0] is lo_model)
+# 强度 0：与官方一致，短路返回原模型（不会去解析文件路径）
+check("  强度 0 原样返回（不读文件）",
+      lo_node.load_lora_model_only(lo_model, "不存在的.safetensors", 0)[0] is lo_model)
+# 文件不存在时保持官方行为：抛 FileNotFoundError
+lo_raised = None
+try:
+    lo_node.load_lora_model_only(lo_model, "不存在的.safetensors", 1.0)
+except Exception as exc:  # noqa: BLE001
+    lo_raised = exc
+check("  文件缺失时抛 FileNotFoundError（与官方一致）",
+      isinstance(lo_raised, FileNotFoundError), type(lo_raised).__name__ if lo_raised else "None")
+
+# 前端/文档契约：本节点没有自定义前端脚本，靠原生 widget 即可
+check("  没有为该节点引入前端脚本", not os.path.isfile(os.path.join(pkg_dir, "web", "lora_loader.js")))
+lo_loc = loc_all.get("MK_LoraLoaderModelOnly")
+check("  语言包含 MK_LoraLoaderModelOnly", lo_loc is not None)
+if lo_loc:
+    check("  语言包输入 id 均合法",
+          set(lo_loc.get("inputs", {})) <= set(lo_it["required"]),
+          str(set(lo_loc.get("inputs", {})) - set(lo_it["required"])))
+    check("  语言包输出按索引翻译", set(lo_loc.get("outputs", {})) == {"0"},
+          str(sorted(lo_loc.get("outputs", {}))))
+    check("  语言包 display_name 与注册一致",
+          lo_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_LoraLoaderModelOnly"],
+          f"{lo_loc.get('display_name')!r}")
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")

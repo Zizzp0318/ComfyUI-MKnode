@@ -18,6 +18,7 @@ from .nodes import (
     MKImageCrop,
     MKImageSelector,
     MKLoadImage,
+    MKLoraLoaderModelOnly,
     MKPromptConcat,
     MKPromptLibrary,
     MKPromptPreset,
@@ -37,6 +38,7 @@ NODE_CLASS_MAPPINGS = {
     "MK_PromptPreset": MKPromptPreset,
     "MK_PromptLibrary": MKPromptLibrary,
     "MK_ImageCrop": MKImageCrop,
+    "MK_LoraLoaderModelOnly": MKLoraLoaderModelOnly,
     "MK_SaveImage": MKSaveImage,
 }
 
@@ -52,6 +54,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_PromptPreset": "MK-提示词预设管理",
     "MK_PromptLibrary": "MK-提示词大全",
     "MK_ImageCrop": "MK-图像裁剪",
+    "MK_LoraLoaderModelOnly": "MK-Lora加载器",
     "MK_SaveImage": "MK-图像保存",
 }
 
