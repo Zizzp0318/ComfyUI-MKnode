@@ -879,11 +879,30 @@ check("  节点包围盒用 measure() 现算（不依赖每帧缓存）",
 check("  分组包围盒优先 getBounding（同步布局 store）",
       "typeof group?.getBounding === \"function\"" in fg_js)
 check("  面板版本标记存在（便于确认脚本已刷新）",
-      'PANEL_VERSION = "v2"' in fg_js)
+      'PANEL_VERSION = "v4"' in fg_js)
+# v4：节点高度按内容自适应，只有一个分组时不再拖一大片空白
+check("  节点高度按内容自适应", "mkFgFitHeight" in fg_js and "mkFgContentHeight" in fg_js)
+check("  内容过高时改为列表内滚动", "MAX_CONTENT_HEIGHT" in fg_js)
+check("  内容没变时不改节点尺寸（不跟手动拉尺寸打架）", "_mkFgFitContent" in fg_js)
+# 性能模型（v3）：分组快照跨面板共享 + TTL、拖动跳过、动作走一次计算
+check("  分组快照跨面板共享（getGroupSnapshot + TTL）",
+      "function getGroupSnapshot()" in fg_js and "SNAPSHOT_TTL" in fg_js)
+check("  拖动/框选时跳过重算", "function isInteracting()" in fg_js and "isInteracting())" in fg_js)
+check("  点击后只按已有成员刷新（不再逐组重算）", "mkFgAfterChange" in fg_js)
+check("  页面在后台时不重算", "document.hidden" in fg_js)
+check("  不再有每面板独立的全量收集函数", "function collectGroups" not in fg_js)
 check("  属性键与上游一致",
       all(f'{k}:' in fg_js for k in ("matchColors", "matchTitle", "showNav", "showAllGraphs",
                                      "sort", "customSortAlphabet", "toggleRestriction")))
-check("  不引用 rgthree 的任何文件", "rgthree" not in fg_js.lower().replace("rgthree-comfy", ""))
+# 只检查「代码」里有没有依赖 rgthree：注释里提到上游名字是正常的（说明来源）
+import re as _re  # noqa: E402
+
+fg_code_only = _re.sub(r"/\*[\s\S]*?\*/", "", fg_js)  # 去掉块注释
+fg_code_only = "\n".join(
+    line for line in fg_code_only.splitlines() if not line.strip().startswith("//")
+)
+check("  不引用 rgthree 的任何文件（注释提及不算）",
+      "rgthree" not in fg_code_only.lower().replace("rgthree-comfy", ""))
 
 for node_id in ("MK_FastGroupsMuter", "MK_FastGroupsBypasser"):
     fg_loc = loc_all.get(node_id)
@@ -957,6 +976,20 @@ if lo_loc:
     check("  语言包 display_name 与注册一致",
           lo_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_LoraLoaderModelOnly"],
           f"{lo_loc.get('display_name')!r}")
+
+print("=== 16. 提示词大全：分类排序（前端契约）===")
+pl_js = _read("web/prompt_library.js")
+check("  有同级上移/下移实现", "function _libMoveNode(lib, id, direction)" in pl_js)
+check("  拖拽与按钮共用同一套编号规则", "function _libApplyCategoryOrder(list)" in pl_js)
+check("  拖拽落位按显示顺序重排", "_libApplyCategoryOrder(sorted)" in pl_js)
+check("  分类行有 ↑ / ↓ 按钮", 'up.textContent = "↑"' in pl_js and 'down.textContent = "↓"' in pl_js)
+check("  按钮挂在「非收藏」行上（收藏固定第一）",
+      "if (!isFav) {" in pl_js and "up.disabled = pos <= 0" in pl_js)
+check("  末位时下移按钮禁用", "down.disabled = pos < 0 || pos >= siblingsRest.length - 1" in pl_js)
+check("  上移/下移后存盘并重绘",
+      "await moveCategory(node, -1)" in pl_js and "await moveCategory(node, 1)" in pl_js)
+check("  有按钮样式（平时压暗 / hover 提亮）", ".mk-pl-tree-move" in pl_js)
+check("  分类下拉/移动目标按显示顺序遍历", "for (const node of _libSortNodes(nodes))" in pl_js)
 
 print()
 if fails:

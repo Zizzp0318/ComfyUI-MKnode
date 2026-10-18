@@ -205,7 +205,8 @@ function _libEnsureDefaultCategory(lib) {
 }
 
 function _libWalk(nodes, fn, parent = null, depth = 0) {
-    for (const node of nodes) {
+    // 按显示顺序遍历：编辑器里的分类下拉、批量「移动到…」都靠它，顺序要和左树一致
+    for (const node of _libSortNodes(nodes)) {
         fn(node, parent, depth);
         _libWalk(node.children, fn, node, depth + 1);
     }
@@ -244,6 +245,36 @@ function _libSortNodes(list) {
 }
 function _libSortItems(list) {
     return [...list].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+}
+
+/**
+ * 把「显示顺序」写回 order 字段（收藏永远钉在最前）。
+ * 拖拽和上移/下移都走这里，保证两条路径的编号规则一致。
+ */
+function _libApplyCategoryOrder(list) {
+    const fav = list.filter(n => n.id === _FAV_ID);
+    const rest = list.filter(n => n.id !== _FAV_ID);
+    [...fav, ...rest].forEach((n, i) => { n.order = (i + 1) * 1000; });
+}
+
+/**
+ * 同级上移/下移一个分类。
+ * @param direction -1 上移，1 下移
+ * @returns 是否真的动过（已在头/尾时返回 false）
+ */
+function _libMoveNode(lib, id, direction) {
+    const list = _libSiblingsOf(lib, id);
+    if (!list) return false;
+    // 按「当前显示顺序」算位置，不能直接用数组下标：order 与数组顺序可能不一致
+    const sorted = _libSortNodes(list);
+    const fav = sorted.filter(n => n.id === _FAV_ID);
+    const rest = sorted.filter(n => n.id !== _FAV_ID);
+    const from = rest.findIndex(n => n.id === id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= rest.length) return false;
+    [rest[from], rest[to]] = [rest[to], rest[from]];
+    [...fav, ...rest].forEach((n, i) => { n.order = (i + 1) * 1000; });
+    return true;
 }
 
 function _libCollectNodes(lib) {
@@ -430,6 +461,14 @@ async function _openLibraryPicker(node) {
         .mk-pl-tree-count { flex:none; color:#8a8f98; font-size:11px; }
         .mk-pl-tree-btn { flex:none; background:transparent; border:0; color:#9aa0a6; cursor:pointer; font-size:13px; padding:1px 3px; border-radius:3px; line-height:1; }
         .mk-pl-tree-btn:hover { background:#3a3d44; color:#fff; }
+        /* 上移/下移：平时压暗，鼠标移到该行再亮起来，避免行内按钮太多显得乱 */
+        .mk-pl-tree-move { color:#6d7278; font-size:14px; }
+        .mk-pl-tree-row:hover .mk-pl-tree-move { color:#cfd3d8; }
+        .mk-pl-tree-move:hover { color:#fff; }
+        .mk-pl-tree-move:disabled { opacity:.25; cursor:default; }
+        .mk-pl-tree-move:disabled:hover { background:transparent; color:#6d7278; }
+        /* 上移/下移和后面的 + ✎ × 隔开一点，避免误点 */
+        .mk-pl-tree-move + .mk-pl-tree-btn { margin-left:3px; }
         .mk-pl-fav { color:#e7b94f !important; font-weight:700; }
         .mk-pl-card { width:134px; border:1px solid #3a3a3a; border-radius:6px; background:#2a2c30; overflow:hidden; cursor:pointer; display:flex; flex-direction:column; transition:border-color .15s, box-shadow .15s; }
         .mk-pl-card:hover { border-color:#6b7077; }
@@ -652,6 +691,13 @@ async function _openLibraryPicker(node) {
 
     const clearMarker = root => root.querySelector(".mk-pl-insert-marker")?.remove();
 
+    /** 上移/下移一个分类（同级、收藏钉在最前），存盘后整体重绘 */
+    const moveCategory = async (nodeRef, direction) => {
+        if (!_libMoveNode(lib, nodeRef.id, direction)) return;
+        await persist();
+        renderAll();
+    };
+
     const renderTree = () => {
         treeList.replaceChildren();
         const build = (node, depth) => {
@@ -685,6 +731,21 @@ async function _openLibraryPicker(node) {
             row.append(toggle, label, count);
 
             if (!isFav) {
+                // 上移 / 下移：同级内调顺序（收藏固定第一，不参与）
+                const siblingsRest = _libSortNodes(_libSiblingsOf(lib, node.id) || [])
+                    .filter(n => n.id !== _FAV_ID);
+                const pos = siblingsRest.findIndex(n => n.id === node.id);
+                const up = document.createElement("button");
+                up.type = "button"; up.className = "mk-pl-tree-btn mk-pl-tree-move"; up.textContent = "↑";
+                up.title = zh ? "上移（和上一个分类交换位置）" : "Move up";
+                up.disabled = pos <= 0;
+                up.addEventListener("click", async e => { e.stopPropagation(); await moveCategory(node, -1); });
+                const down = document.createElement("button");
+                down.type = "button"; down.className = "mk-pl-tree-btn mk-pl-tree-move"; down.textContent = "↓";
+                down.title = zh ? "下移（和下一个分类交换位置）" : "Move down";
+                down.disabled = pos < 0 || pos >= siblingsRest.length - 1;
+                down.addEventListener("click", async e => { e.stopPropagation(); await moveCategory(node, 1); });
+
                 const addChild = document.createElement("button");
                 addChild.type = "button"; addChild.className = "mk-pl-tree-btn"; addChild.textContent = "+"; addChild.title = zh ? "新建子分类" : "New subcategory";
                 addChild.addEventListener("click", async e => { e.stopPropagation(); await createCategory(node); });
@@ -694,7 +755,7 @@ async function _openLibraryPicker(node) {
                 const del = document.createElement("button");
                 del.type = "button"; del.className = "mk-pl-tree-btn"; del.textContent = "×"; del.title = zh ? "删除" : "Delete"; del.style.color = "#c75c5c";
                 del.addEventListener("click", async e => { e.stopPropagation(); await removeCategory(node); });
-                row.append(addChild, rename, del);
+                row.append(up, down, addChild, rename, del);
             }
 
             row.addEventListener("click", () => { selectedId = node.id; selectedKeys.clear(); renderAll(); });
@@ -736,14 +797,16 @@ async function _openLibraryPicker(node) {
                     event.preventDefault(); event.stopPropagation();
                     const { index } = nodeInsert;
                     nodeInsert = null; clearMarker(treeList);
-                    const list = _libSiblingsOf(lib, dragId);
-                    if (!list) return;
-                    const from = list.findIndex(n => n.id === dragId);
+                    const siblings = _libSiblingsOf(lib, dragId);
+                    if (!siblings) return;
+                    // 以「显示顺序」为准重排：order 与数组下标可能不一致，直接改数组会算错位置
+                    const sorted = _libSortNodes(siblings);
+                    const from = sorted.findIndex(n => n.id === dragId);
                     if (from < 0) return;
-                    const [moved] = list.splice(from, 1);
-                    const to = from < index ? index - 1 : index;
-                    list.splice(Math.max(0, Math.min(list.length, to)), 0, moved);
-                    list.forEach((n, i) => { n.order = (i + 1) * 1000; });
+                    const [moved] = sorted.splice(from, 1);
+                    const to = Math.max(0, Math.min(sorted.length, from < index ? index - 1 : index));
+                    sorted.splice(to, 0, moved);
+                    _libApplyCategoryOrder(sorted);
                     await persist(); renderAll();
                 });
             }
@@ -1336,6 +1399,11 @@ textarea.mk-pl-textbox:active {
 // ═══════════════════════════════════════════════
 //  注册扩展
 // ═══════════════════════════════════════════════
+// 便于确认前端脚本已刷新（浏览器缓存旧文件时不会打印这一行）
+if (typeof console !== "undefined") {
+    console.info("[MK] MK-提示词大全 已加载（分类排序 v2：↑↓ 按钮 + 拖拽同级重排）");
+}
+
 app.registerExtension({
     name: "Comfyui_MKnode.PromptLibrary",
 
