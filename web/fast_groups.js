@@ -19,17 +19,27 @@ import { app } from "../../scripts/app.js";
 const STYLE_ID = "mk-fg-style";
 
 // 面板版本：v2 = 修掉「切工作流后分组算不出成员（全灰、点了没反应）」
-const PANEL_VERSION = "v2";
+//          v3 = 分组快照跨面板共享 + 拖动时跳过 + 点击不再重复全量重算
+//          v4 = 节点高度按内容自适应（只有一个分组时不再拖一大片空白）
+const PANEL_VERSION = "v4";
 
 // LiteGraph 的节点模式常量
 const MODE_ON = 0; // ALWAYS
 const MODE_NEVER = 2; // 禁用（Mute）
 const MODE_BYPASS = 4; // 忽略（ComfyUI 的 Bypass）
 
-const MIN_PANEL_HEIGHT = 150;
-const MIN_NODE_SIZE = [300, 300];
+// 面板最小高度：只放得下一行时也别留大片空白
+const MIN_PANEL_HEIGHT = 80;
+// 节点最小尺寸：高度放小，好让节点能缩到「刚好装下内容」
+const MIN_NODE_SIZE = [300, 160];
+// 内容高度上限：分组很多时不让节点无限长高，超出就列表内滚动
+const MAX_CONTENT_HEIGHT = 420;
 const DEFAULT_NODE_SIZE = [340, 430];
 const REFRESH_MS = 700;
+// 分组快照的有效期。面板数越多、节点越多，TTL 越值钱；调太小等于没缓存，调太大状态就跟不上拖动。
+const SNAPSHOT_TTL = 350;
+// 拖动期间最多连续跳过的时长。防止指针状态卡住导致面板再也不刷新。
+const MAX_SKIP_MS = 2000;
 
 // 节点属性键（与上游保持一致，方便对照文档）
 const P = {
@@ -75,7 +85,8 @@ const CSS = `
     box-sizing: border-box;
     width: 100%;
     height: 100%;
-    min-height: 150px;
+    /* 与 JS 里的 MIN_PANEL_HEIGHT 保持一致：只有一行分组时面板也别撑高 */
+    min-height: 80px;
     display: flex;
     flex-direction: column;
     gap: 5px;
@@ -364,27 +375,62 @@ function groupIsOn(members) {
     return members.some((node) => node.mode === MODE_ON);
 }
 
-/** 收集所有分组：当前图 + （可选）各级子图里的分组 */
-function collectGroups(includeSubGraphs) {
-    const root = currentGraph();
-    const result = [];
-    const seenGraph = new Set();
+/**
+ * 分组快照：**全局面板共享**。
+ *
+ * 为什么共享：一个工作流里可能同时放着「禁用多框」「忽略多框」甚至几个副本，
+ * 每个面板各算一遍纯属浪费（成本随面板数线性增长）。这里只算一次，TTL 内复用，
+ * 与上游 rgthree 的 `msThreshold = 400` 是同一个思路。
+ *
+ * 快照只存「分组 + 成员」这类与面板筛选无关的数据；排序、标题/颜色过滤由各面板自己再做。
+ */
+let sharedSnapshot = null; // { at, graph, items: [{ group, graph, members }] }
 
-    const walk = (graph, depth) => {
-        if (!graph || seenGraph.has(graph) || depth > 16) return;
-        seenGraph.add(graph);
-        for (const group of nodesOfGroups(graph)) {
+function getGroupSnapshot() {
+    const graph = currentGraph();
+    const now = Date.now();
+    if (sharedSnapshot && sharedSnapshot.graph === graph && now - sharedSnapshot.at < SNAPSHOT_TTL) {
+        return sharedSnapshot;
+    }
+
+    const items = [];
+    // 所有分组共用一份包围盒缓存：整轮只对每个节点算一次 measure()，O(N) 而不是 O(分组数×N)
+    const readBounding = makeBoundingReader();
+    const seen = new Set();
+    const walk = (g, depth) => {
+        if (!g || seen.has(g) || depth > 16) return;
+        seen.add(g);
+        for (const group of nodesOfGroups(g)) {
             if (!group) continue;
-            result.push({ group, graph });
+            items.push({ group, graph: g, members: membersOf(group, readBounding) });
         }
-        if (!includeSubGraphs) return;
-        for (const node of nodesOf(graph)) {
+        for (const node of nodesOf(g)) {
             const sub = node?.subgraph || node?.subGraph;
             if (sub) walk(sub, depth + 1);
         }
     };
-    walk(root, 0);
-    return result;
+    walk(graph, 0);
+
+    sharedSnapshot = { at: now, graph, items };
+    return sharedSnapshot;
+}
+
+/** 丢弃快照（结构真正变化、需要立刻重算时用） */
+function invalidateSnapshot() {
+    sharedSnapshot = null;
+}
+
+/**
+ * 是否正在拖动/框选/平移。
+ * 这几种状态下节点位置每帧都在变，重算出来马上又过期，属于纯浪费；
+ * 上游 rgthree 也是在 `recomputeInsideNodesForGroup` 里直接 `if (app.canvas.isDragging) return`。
+ */
+function isInteracting() {
+    const canvas = app.canvas;
+    if (!canvas) return false;
+    if (canvas.isDragging) return true;
+    if (canvas.pointer?.isDown) return true;
+    return false;
 }
 
 /** 颜色归一化：支持 ComfyUI 预设色名与 #abc / #aabbcc */
@@ -427,6 +473,8 @@ let pollTimer = null;
 function ensurePolling() {
     if (pollTimer || typeof setInterval !== "function") return;
     pollTimer = setInterval(() => {
+        // 页面在后台（切标签/最小化）时不做任何计算
+        if (typeof document !== "undefined" && document.hidden) return;
         for (const node of activeNodes) {
             try {
                 node.mkFgRefresh?.();
@@ -492,6 +540,8 @@ app.registerExtension({
                 event.stopPropagation();
                 settings.classList.toggle("is-open");
                 gear.classList.toggle("is-on", settings.classList.contains("is-open"));
+                // 设置区开合会改变内容高度 → 重新贴合
+                this.mkFgFitHeight(true);
             });
             head.appendChild(count);
             head.appendChild(gear);
@@ -538,6 +588,9 @@ app.registerExtension({
             wrap.addEventListener("mousedown", (event) => event.stopPropagation());
 
             this._mkFgWrap = wrap;
+            this._mkFgHeadEl = head;
+            this._mkFgActionsEl = actions;
+            this._mkFgSettingsEl = settings;
             this._mkFgCountEl = count;
             this._mkFgListEl = list;
             this._mkFgEmptyEl = empty;
@@ -560,8 +613,14 @@ app.registerExtension({
 
             this.mkFgSyncPanelHeight();
             if (typeof requestAnimationFrame === "function") {
-                requestAnimationFrame(() => this.mkFgSyncPanelHeight());
-                setTimeout(() => this.mkFgSyncPanelHeight(), 80);
+                requestAnimationFrame(() => {
+                    this.mkFgSyncPanelHeight();
+                    this.mkFgFitHeight(true);
+                });
+                setTimeout(() => {
+                    this.mkFgSyncPanelHeight();
+                    this.mkFgFitHeight(true);
+                }, 80);
             }
         };
 
@@ -667,21 +726,106 @@ app.registerExtension({
             const widget = this._mkFgWidget;
             if (!wrap || !widget || !Array.isArray(this.size)) return;
 
+            const top = Number.isFinite(widget.y) ? widget.y : 90;
             let h = widget.computedHeight;
             if (!(typeof h === "number" && h > 0)) {
-                const top = Number.isFinite(widget.y) ? widget.y : 90;
                 h = this.size[1] - top - 6;
             }
             const px = Math.max(MIN_PANEL_HEIGHT, Math.round(h - 4));
             wrap.style.height = `${px}px`;
             wrap.style.minHeight = `${px}px`;
+
+            // 顺手记下「面板之下还占了多少像素」（节点底部 chrome / 包名徽标）。
+            // mkFgFitHeight 要用它反推节点该多高，才能让面板刚好装下内容而不是靠猜常数。
+            const chrome = this.size[1] - (top + px);
+            if (Number.isFinite(chrome) && chrome >= 0 && chrome < 200) this._mkFgChrome = chrome;
+        };
+
+        /**
+         * 面板内容需要多高（不拉伸）。
+         * 列表用 flex:1 拉伸过，scrollHeight 不可靠，所以按行高累加。
+         */
+        nodeType.prototype.mkFgContentHeight = function () {
+            const wrap = this._mkFgWrap;
+            if (!wrap || !wrap.isConnected) return 0;
+            const style = getComputedStyle(wrap);
+            const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+            const gap = parseFloat(style.rowGap) || 0;
+
+            const parts = [];
+            for (const el of [this._mkFgHeadEl, this._mkFgActionsEl]) {
+                if (el && el.offsetHeight) parts.push(el.offsetHeight);
+            }
+            const settings = this._mkFgSettingsEl;
+            if (settings && settings.classList.contains("is-open") && settings.offsetHeight) {
+                parts.push(settings.offsetHeight);
+            }
+
+            const rows = this._mkFgRows || [];
+            if (rows.length) {
+                const listGap = this._mkFgListEl ? parseFloat(getComputedStyle(this._mkFgListEl).rowGap) || 0 : 0;
+                const rowsH = rows.reduce((sum, row) => sum + row.el.offsetHeight, 0);
+                parts.push(rowsH + listGap * Math.max(0, rows.length - 1));
+            } else {
+                parts.push(52); // 空态占位
+            }
+
+            if (!parts.length) return 0;
+            return padY + parts.reduce((a, b) => a + b, 0) + gap * Math.max(0, parts.length - 1);
+        };
+
+        /**
+         * 让节点高度贴合内容——只有一个分组时不再拖着一大片空白。
+         *
+         * 只在「内容高度变化」时才调 setSize：这样用户手动拉高拉矮后，下一轮轮询
+         * 不会把他的尺寸弹回去（内容没变就不动）。
+         * @param force 设置区开合、首次挂载等需要强制贴合时传 true
+         */
+        nodeType.prototype.mkFgFitHeight = function (force) {
+            const wrap = this._mkFgWrap;
+            const widget = this._mkFgWidget;
+            if (!wrap || !widget || !Array.isArray(this.size) || typeof this.setSize !== "function") return;
+            if (typeof getComputedStyle !== "function") return;
+
+            const content = this.mkFgContentHeight();
+            // 还没挂到文档里（量不到高度）时不动手，等下一次 rAF / 轮询
+            if (!(content > 40)) return;
+
+            const capped = Math.min(Math.round(content), MAX_CONTENT_HEIGHT);
+            // 容差 2px：避免因为 1px 的测量抖动每轮都 setSize（会闪）
+            if (!force && Math.abs(capped - (this._mkFgFitContent ?? -999)) < 2) return;
+
+            const top = Number.isFinite(widget.y) ? widget.y : 90;
+            const chromeKnown = Number.isFinite(this._mkFgChrome);
+            const chrome = chromeKnown ? this._mkFgChrome : 34;
+            // 第一次用的是估算的 chrome（节点底部 chrome 还没量到）：算完别落账，
+            // 等下一轮量到真实值再对一次；最多重试 3 次，避免量不到时每轮都 setSize
+            this._mkFgFitTries = (this._mkFgFitTries || 0) + 1;
+            this._mkFgFitContent = chromeKnown || this._mkFgFitTries > 3 ? capped : null;
+            const desired = Math.max(MIN_NODE_SIZE[1], Math.round(top + capped + chrome));
+            if (Math.abs(desired - this.size[1]) <= 2) {
+                this.mkFgSyncPanelHeight();
+                return;
+            }
+
+            this.setSize([this.size[0], desired]);
+            this.mkFgSyncPanelHeight();
+            // setSize 之后 computedHeight 可能还没更新，下一帧再对一次
+            if (typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(() => this.mkFgSyncPanelHeight());
+            }
         };
 
         // ── 分组列表 ──
-        /** 按属性过滤 + 排序，得到要显示的分组 */
+        /**
+         * 按属性过滤 + 排序，得到要显示的分组。
+         * 分组与成员来自共享快照（多个面板只算一次），这里只做本面板自己的筛选与排序。
+         */
         nodeType.prototype.mkFgEntries = function () {
+            const root = currentGraph();
             const includeSub = this.mkFgProp(P.showAllGraphs) !== false;
-            let groups = collectGroups(includeSub);
+            let groups = getGroupSnapshot().items.slice(); // 复制：下面要按本面板排序，不能打乱共享快照
+            if (!includeSub) groups = groups.filter((item) => item.graph === root);
 
             // 颜色过滤
             const colorFilter = String(this.mkFgProp(P.matchColors) || "")
@@ -741,18 +885,14 @@ app.registerExtension({
                 });
             }
 
-            // 同一轮里所有分组共用一份包围盒缓存
-            const readBounding = makeBoundingReader();
-            return groups.map(({ group, graph }) => {
-                const members = membersOf(group, readBounding);
-                return {
-                    key: `${graph?.id ?? "g"}:${group.title ?? ""}`,
-                    group,
-                    graph,
-                    members,
-                    on: groupIsOn(members),
-                };
-            });
+            // 成员来自共享快照，不再逐组重算
+            return groups.map(({ group, graph, members }) => ({
+                key: `${graph?.id ?? "g"}:${group.title ?? ""}`,
+                group,
+                graph,
+                members,
+                on: groupIsOn(members),
+            }));
         };
 
         /** 重建行元素 */
@@ -810,48 +950,72 @@ app.registerExtension({
         /** 只更新行的开关状态，不重建 DOM（避免闪烁与悬停丢失） */
         nodeType.prototype.mkFgUpdateRows = function () {
             for (const row of this._mkFgRows || []) {
-                row.el.classList.toggle("is-on", Boolean(row.entry.on));
-                row.toggle.textContent = row.entry.on ? config.onText : config.offText;
-                row.toggle.setAttribute("aria-pressed", row.entry.on ? "true" : "false");
+                const on = Boolean(row.entry.on);
+                // 只在真的变化时写 DOM：轮询每秒会跑一到两次，无谓写入会拖慢渲染
+                if (row.el.classList.contains("is-on") !== on) row.el.classList.toggle("is-on", on);
+                const text = on ? config.onText : config.offText;
+                if (row.toggle.textContent !== text) row.toggle.textContent = text;
+                row.toggle.setAttribute("aria-pressed", on ? "true" : "false");
             }
         };
 
         /**
          * 刷新面板。
          * @param force 为 true 时无条件重建行（改设置后需要）
+         * @param entries 已经算好的列表（动作触发时传入，避免再算一遍）
          */
-        nodeType.prototype.mkFgRefresh = function (force) {
+        nodeType.prototype.mkFgRefresh = function (force, entries) {
             if (!this._mkFgListEl) return;
+            // 拖动/框选/平移期间跳过：此刻位置每帧都在变，算了立刻过期。
+            // 动作触发的刷新会直接传 entries，不受此影响，点击始终有反馈。
+            if (!entries && isInteracting()) {
+                const now = Date.now();
+                if (!this._mkFgSkipAt) this._mkFgSkipAt = now;
+                // 兜底：万一指针状态卡住（比如在画布外松开），最多连跳 2 秒就放行一次
+                if (now - this._mkFgSkipAt < MAX_SKIP_MS) return;
+                this._mkFgSkipAt = 0;
+            } else {
+                this._mkFgSkipAt = 0;
+            }
 
-            const entries = this.mkFgEntries();
+            const list = entries || this.mkFgEntries();
 
             // 分组的「身份序列」变了才重建 DOM（顺序、数量、标题）
-            const keySeq = entries.map((e) => e.key).join("|");
-            const needRebuild = force || keySeq !== this._mkFgKeySeq;
+            const keySeq = list.map((e) => e.key).join("|");
+            const needRebuild =
+                force || keySeq !== this._mkFgKeySeq || list.length !== (this._mkFgRows || []).length;
             this._mkFgKeySeq = keySeq;
 
             if (needRebuild) {
-                this.mkFgRenderRows(entries);
+                this.mkFgRenderRows(list);
             } else {
                 // 复用行元素，只把最新的 entry 挂回去（members/on 已重算）
                 this._mkFgRows.forEach((row, index) => {
-                    row.entry = entries[index] || row.entry;
+                    row.entry = list[index] || row.entry;
                 });
                 this.mkFgUpdateRows();
             }
 
             if (this._mkFgCountEl) {
-                if (!entries.length) {
-                    this._mkFgCountEl.textContent = "分组 0 个";
-                } else {
-                    const onCount = entries.filter((e) => e.on).length;
-                    this._mkFgCountEl.textContent = `分组 ${entries.length} 个 · 已启用 ${onCount}`;
-                }
+                const text = list.length
+                    ? `分组 ${list.length} 个 · 已启用 ${list.filter((e) => e.on).length}`
+                    : "分组 0 个";
+                if (this._mkFgCountEl.textContent !== text) this._mkFgCountEl.textContent = text;
             }
 
-            const hasGroups = entries.length > 0;
+            const hasGroups = list.length > 0;
             this._mkFgListEl.style.display = hasGroups ? "" : "none";
             if (this._mkFgEmptyEl) this._mkFgEmptyEl.style.display = hasGroups ? "none" : "";
+
+            // 行数变了就重新贴合高度（内容没变时这里什么都不做，不会跟用户手动拉尺寸打架）
+            this.mkFgFitHeight();
+        };
+
+        /** 动作改完模式后的统一收尾：按已有成员重算开关态 → 刷新面板 → 重画画布 */
+        nodeType.prototype.mkFgAfterChange = function (entries) {
+            for (const entry of entries) entry.on = groupIsOn(entry.members);
+            this.mkFgRefresh(false, entries);
+            currentGraph()?.setDirtyCanvas?.(true, true);
         };
 
         // ── 模式切换 ──
@@ -862,27 +1026,29 @@ app.registerExtension({
          * @param skipOtherCheck 批量操作时跳过「开关规则」的联动
          */
         nodeType.prototype.mkFgChange = function (group, force, skipOtherCheck) {
-            const members = membersOf(group);
+            // 一次拿到全部分组（共享快照，通常直接命中缓存），后面不再重复遍历
+            const entries = this.mkFgEntries();
+            const entry = entries.find((item) => item.group === group);
+            const members = entry ? entry.members : membersOf(group);
             const restriction = String(this.mkFgProp(P.toggleRestriction) || "default");
             let newValue = force !== undefined ? Boolean(force) : !groupIsOn(members);
+            const turnOff = [];
 
             if (!skipOtherCheck) {
                 if (newValue && restriction.includes(" one")) {
-                    // 最多一个 / 始终一个：打开这个就把别的都关掉
-                    for (const entry of this.mkFgEntries()) {
-                        if (entry.group === group) continue;
-                        if (entry.on) this.mkFgChange(entry.group, false, true);
+                    // 最多一个 / 始终一个：打开这个就把别的都关掉（只记下来，最后一起改，不递归刷新）
+                    for (const other of entries) {
+                        if (other.group !== group && other.on) turnOff.push(other);
                     }
                 } else if (!newValue && restriction === "always one") {
                     // 始终一个：允许关，但前提是还有别的开着
-                    const othersOn = this.mkFgEntries().some((e) => e.group !== group && e.on);
-                    if (!othersOn) newValue = true;
+                    if (!entries.some((other) => other.group !== group && other.on)) newValue = true;
                 }
             }
 
             setModeDeep(members, newValue ? MODE_ON : config.offMode);
-            this.mkFgRefresh(true);
-            currentGraph()?.setDirtyCanvas?.(true, true);
+            for (const other of turnOff) setModeDeep(other.members, config.offMode);
+            this.mkFgAfterChange(entries);
         };
 
         /** 全部启用 / 全部关闭 / 反转 */
@@ -891,10 +1057,9 @@ app.registerExtension({
             const onlyOne = restriction.includes(" one");
             const entries = this.mkFgEntries();
             entries.forEach((entry, index) => {
-                setModeDeep(membersOf(entry.group), onlyOne && index > 0 ? config.offMode : MODE_ON);
+                setModeDeep(entry.members, onlyOne && index > 0 ? config.offMode : MODE_ON);
             });
-            this.mkFgRefresh(true);
-            currentGraph()?.setDirtyCanvas?.(true, true);
+            this.mkFgAfterChange(entries);
         };
 
         nodeType.prototype.mkFgDisableAll = function () {
@@ -902,10 +1067,9 @@ app.registerExtension({
             const alwaysOne = restriction === "always one";
             const entries = this.mkFgEntries();
             entries.forEach((entry, index) => {
-                setModeDeep(membersOf(entry.group), alwaysOne && index === 0 ? MODE_ON : config.offMode);
+                setModeDeep(entry.members, alwaysOne && index === 0 ? MODE_ON : config.offMode);
             });
-            this.mkFgRefresh(true);
-            currentGraph()?.setDirtyCanvas?.(true, true);
+            this.mkFgAfterChange(entries);
         };
 
         nodeType.prototype.mkFgToggleAll = function () {
@@ -916,13 +1080,12 @@ app.registerExtension({
             for (const entry of entries) {
                 const target = onlyOne && foundOn ? false : !entry.on;
                 foundOn = foundOn || target;
-                setModeDeep(membersOf(entry.group), target ? MODE_ON : config.offMode);
+                setModeDeep(entry.members, target ? MODE_ON : config.offMode);
             }
             if (!foundOn && restriction === "always one" && entries.length) {
-                setModeDeep(membersOf(entries[entries.length - 1].group), MODE_ON);
+                setModeDeep(entries[entries.length - 1].members, MODE_ON);
             }
-            this.mkFgRefresh(true);
-            currentGraph()?.setDirtyCanvas?.(true, true);
+            this.mkFgAfterChange(entries);
         };
 
         /** 跳转到分组：有 canvas 就居中并缩放，没有就静默跳过（Nodes 2.0 无 canvas 时） */
@@ -957,6 +1120,7 @@ app.registerExtension({
             this.mkFgSyncSettings();
             activeNodes.add(this);
             ensurePolling();
+            invalidateSnapshot();
             this.mkFgRefresh(true);
             if (typeof this.setSize === "function") {
                 if (!Array.isArray(this.size) || this.size[1] < MIN_NODE_SIZE[1]) {
@@ -973,9 +1137,14 @@ app.registerExtension({
             this.mkFgSyncSettings();
             activeNodes.add(this);
             ensurePolling();
+            // 载入/粘贴后图结构刚变过，别让共享快照拖到下一轮 TTL
+            invalidateSnapshot();
             this.mkFgRefresh(true);
             if (typeof requestAnimationFrame === "function") {
-                requestAnimationFrame(() => this.mkFgSyncPanelHeight());
+                requestAnimationFrame(() => {
+                    this.mkFgSyncPanelHeight();
+                    this.mkFgFitHeight(true);
+                });
             }
             return result;
         };
