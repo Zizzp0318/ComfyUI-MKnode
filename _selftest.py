@@ -991,6 +991,87 @@ check("  上移/下移后存盘并重绘",
 check("  有按钮样式（平时压暗 / hover 提亮）", ".mk-pl-tree-move" in pl_js)
 check("  分类下拉/移动目标按显示顺序遍历", "for (const node of _libSortNodes(nodes))" in pl_js)
 
+print("=== 17. 自适应百万像素（MK_AdaptiveMegapixels，V3）===")
+import torch as _torch  # noqa: E402
+from Comfyui_MKnode.nodes.adaptive_megapixels import (  # noqa: E402
+    MKAdaptiveMegapixels,
+    megapixels_of,
+    clamp_megapixels,
+)
+
+am_schema = MKAdaptiveMegapixels.GET_SCHEMA()
+print("  node_id     :", am_schema.node_id)
+print("  display_name:", am_schema.display_name)
+print("  inputs      :", [i.id for i in am_schema.inputs])
+print("  outputs     :", [(o.id, o.display_name) for o in am_schema.outputs])
+
+check("  已注册", "MK_AdaptiveMegapixels" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-自适应百万像素",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_AdaptiveMegapixels") == "MK-自适应百万像素",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_AdaptiveMegapixels"))
+check("  schema node_id 正确", am_schema.node_id == "MK_AdaptiveMegapixels")
+check("  是 V3 节点（io.ComfyNode 子类）",
+      any(b.__name__ == "ComfyNode" for b in MKAdaptiveMegapixels.__mro__))
+check("  输入为 图像/最小/最大",
+      [i.id for i in am_schema.inputs] == ["image", "min_megapixels", "max_megapixels"],
+      str([i.id for i in am_schema.inputs]))
+check("  单输出 FLOAT",
+      [o.id for o in am_schema.outputs] == ["MEGAPIXELS"], str([o.id for o in am_schema.outputs]))
+check("  分类为 MK节点", am_schema.category == "MK节点")
+
+_am_min = {i.id: i for i in am_schema.inputs}["min_megapixels"]
+_am_max = {i.id: i for i in am_schema.inputs}["max_megapixels"]
+check("  最小百万像素默认 1.0、步长 0.01",
+      float(_am_min.default) == 1.0 and float(_am_min.step) == 0.01,
+      f"{_am_min.default}/{_am_min.step}")
+check("  最大百万像素默认 4.0、步长 0.01",
+      float(_am_max.default) == 4.0 and float(_am_max.step) == 0.01,
+      f"{_am_max.default}/{_am_max.step}")
+check("  上下限都在 0.01 ~ 64", float(_am_min.min) == 0.01 and float(_am_max.max) == 64.0,
+      f"{_am_min.min}/{_am_max.max}")
+
+# 判定规则
+# 输出统一保留 2 位小数：1.048576 → 1.05
+_am_cases = [
+    ("截图场景 1080x1928", (1928, 1080), 1.0, 4.0, 2.08),  # 2.08224 → 2.08
+    ("1024x1024 落在区间内", (1024, 1024), 1.0, 4.0, 1.05),  # 1.048576 → 1.05
+    ("640x640 低于下限", (640, 640), 1.0, 4.0, 1.0),
+    ("3000x3000 高于上限", (3000, 3000), 1.0, 4.0, 4.0),
+    ("1000x1000 正好等于下限", (1000, 1000), 1.0, 4.0, 1.0),
+    ("四舍五入到两位（1.999396 → 2.0）", (1414, 1414), 1.0, 4.0, 2.0),
+    ("正好等于上限 2.0", (1000, 2000), 1.0, 2.0, 2.0),  # 2,000,000 像素
+    ("最小==最大 → 固定值", (1024, 1024), 1.5, 1.5, 1.5),
+    ("最小>最大 → 自动换位", (1024, 1024), 4.0, 1.0, 1.05),
+    ("自定义小数范围", (1024, 1024), 2.5, 4.0, 2.5),
+]
+for label, (h, w), lo, hi, expect in _am_cases:
+    img = _torch.zeros(1, h, w, 3)
+    got = MKAdaptiveMegapixels.execute(img, lo, hi).result[0]
+    print(f"  {label:22s} -> {got}")
+    check(f"  {label}", abs(float(got) - expect) < 1e-9, f"got {got!r} 期望 {expect}")
+
+check("  输出保留 2 位小数", abs(clamp_megapixels(2.08224, 1.0, 4.0) - 2.08) < 1e-9,
+      str(clamp_megapixels(2.08224, 1.0, 4.0)))
+check("  极小/极大也不会拖长小数", abs(clamp_megapixels(0.123456, 1.0, 4.0) - 1.0) < 1e-9
+      and abs(clamp_megapixels(9.876543, 1.0, 4.0) - 4.0) < 1e-9)
+
+# 批次/单图两种形状都要能读出宽高
+check("  4 维 (B,H,W,C) 取宽高", abs(megapixels_of(_torch.zeros(2, 512, 1024, 3)) - 0.524288) < 1e-9)
+check("  3 维 (H,W,C) 也支持", abs(megapixels_of(_torch.zeros(512, 1024, 3)) - 0.524288) < 1e-9)
+check("  list 批次取第一张", abs(megapixels_of([_torch.zeros(1, 600, 800, 3)]) - 0.48) < 1e-9)
+
+am_loc = loc_all.get("MK_AdaptiveMegapixels")
+check("  语言包含 MK_AdaptiveMegapixels", am_loc is not None)
+if am_loc:
+    check("  语言包输入 id 均合法",
+          set(am_loc.get("inputs", {})) <= {i.id for i in am_schema.inputs},
+          str(set(am_loc.get("inputs", {})) - {i.id for i in am_schema.inputs}))
+    check("  语言包输出按索引翻译", set(am_loc.get("outputs", {})) == {"0"},
+          str(sorted(am_loc.get("outputs", {}))))
+    check("  语言包 display_name 与注册一致",
+          am_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveMegapixels"],
+          f"{am_loc.get('display_name')!r}")
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")
