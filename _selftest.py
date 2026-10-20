@@ -1072,6 +1072,82 @@ if am_loc:
           am_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveMegapixels"],
           f"{am_loc.get('display_name')!r}")
 
+print("=== 18. 自适应最长边（MK_AdaptiveLongestEdge，V3）===")
+from Comfyui_MKnode.nodes.adaptive_longest_edge import (  # noqa: E402
+    MKAdaptiveLongestEdge,
+    longest_edge_of,
+    clamp_edge,
+)
+
+le_schema = MKAdaptiveLongestEdge.GET_SCHEMA()
+print("  node_id     :", le_schema.node_id)
+print("  display_name:", le_schema.display_name)
+print("  inputs      :", [i.id for i in le_schema.inputs])
+print("  outputs     :", [(o.id, o.display_name) for o in le_schema.outputs])
+
+check("  已注册", "MK_AdaptiveLongestEdge" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-自适应最长边",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_AdaptiveLongestEdge") == "MK-自适应最长边",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_AdaptiveLongestEdge"))
+check("  schema node_id 正确", le_schema.node_id == "MK_AdaptiveLongestEdge")
+check("  是 V3 节点（io.ComfyNode 子类）",
+      any(b.__name__ == "ComfyNode" for b in MKAdaptiveLongestEdge.__mro__))
+check("  输入为 图像/最小分辨率/最大分辨率",
+      [i.id for i in le_schema.inputs] == ["image", "min_resolution", "max_resolution"],
+      str([i.id for i in le_schema.inputs]))
+check("  单输出 LONGEST_EDGE",
+      [o.id for o in le_schema.outputs] == ["LONGEST_EDGE"], str([o.id for o in le_schema.outputs]))
+check("  分类为 MK节点", le_schema.category == "MK节点")
+
+_le_in = {i.id: i for i in le_schema.inputs}
+check("  最小分辨率默认 512、步长 1",
+      int(_le_in["min_resolution"].default) == 512 and int(_le_in["min_resolution"].step) == 1,
+      f"{_le_in['min_resolution'].default}/{_le_in['min_resolution'].step}")
+check("  最大分辨率默认 2048",
+      int(_le_in["max_resolution"].default) == 2048,
+      str(_le_in["max_resolution"].default))
+check("  上下限都在 64 ~ 16384",
+      int(_le_in["min_resolution"].min) == 64 and int(_le_in["max_resolution"].max) == 16384,
+      f"{_le_in['min_resolution'].min}/{_le_in['max_resolution'].max}")
+
+_le_cases = [
+    ("1024x1024 落在区间内", (1024, 1024), 512, 2048, 1024),
+    ("400x300 低于下限", (300, 400), 512, 2048, 512),
+    ("1000x600 低边不算（取长边）", (600, 1000), 512, 2048, 1000),
+    ("2000x3000 高于上限", (3000, 2000), 512, 2048, 2048),
+    ("1080x1928 落在区间内", (1928, 1080), 512, 2048, 1928),
+    ("正好等于上限", (1024, 2048), 512, 2048, 2048),
+    ("正好等于下限", (512, 400), 512, 2048, 512),  # 长边 512
+    ("最小==最大 → 固定值", (600, 600), 1024, 1024, 1024),
+    ("最小>最大 → 自动换位", (600, 600), 2048, 512, 600),
+    ("自定义窄区间", (1928, 1080), 800, 1200, 1200),
+]
+for label, (h, w), lo, hi, expect in _le_cases:
+    got = MKAdaptiveLongestEdge.execute(_torch.zeros(1, h, w, 3), lo, hi).result[0]
+    print(f"  {label:26s} -> {got}")
+    check(f"  {label}", int(got) == expect, f"got {got!r} 期望 {expect}")
+
+check("  输出是整数类型", isinstance(
+    MKAdaptiveLongestEdge.execute(_torch.zeros(1, 800, 600, 3), 512, 2048).result[0], int))
+check("  4 维 (B,H,W,C) 取长边", longest_edge_of(_torch.zeros(2, 512, 1024, 3)) == 1024)
+check("  3 维 (H,W,C) 也支持", longest_edge_of(_torch.zeros(512, 1024, 3)) == 1024)
+check("  list 批次取第一张", longest_edge_of([_torch.zeros(1, 600, 800, 3)]) == 800)
+check("  区间端点夹取正确",
+      clamp_edge(10, 512, 2048) == 512 and clamp_edge(99999, 512, 2048) == 2048
+      and clamp_edge(1000, 512, 2048) == 1000)
+
+le_loc = loc_all.get("MK_AdaptiveLongestEdge")
+check("  语言包含 MK_AdaptiveLongestEdge", le_loc is not None)
+if le_loc:
+    check("  语言包输入 id 均合法",
+          set(le_loc.get("inputs", {})) <= {i.id for i in le_schema.inputs},
+          str(set(le_loc.get("inputs", {})) - {i.id for i in le_schema.inputs}))
+    check("  语言包输出按索引翻译", set(le_loc.get("outputs", {})) == {"0"},
+          str(sorted(le_loc.get("outputs", {}))))
+    check("  语言包 display_name 与注册一致",
+          le_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveLongestEdge"],
+          f"{le_loc.get('display_name')!r}")
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")

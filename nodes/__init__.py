@@ -6,6 +6,7 @@
 3. 把节点类加进 NODE_CLASSES
 """
 
+from .adaptive_longest_edge import MKAdaptiveLongestEdge
 from .adaptive_megapixels import MKAdaptiveMegapixels
 from .any_switch import MKAnySwitch
 from .fast_groups import MKFastGroupsBypasser, MKFastGroupsMuter
@@ -31,6 +32,7 @@ NODE_CLASSES = [
     MKPromptLibrary,
     MKImageCrop,
     MKAdaptiveMegapixels,
+    MKAdaptiveLongestEdge,
     MKLoraLoaderModelOnly,
     MKSaveImage,
 ]
@@ -48,6 +50,7 @@ __all__ = [
     "MKPromptLibrary",
     "MKImageCrop",
     "MKAdaptiveMegapixels",
+    "MKAdaptiveLongestEdge",
     "MKLoraLoaderModelOnly",
     "MKSaveImage",
 ]

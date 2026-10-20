@@ -11,6 +11,7 @@ ComfyUI 的加载器对两者是 if/elif 二选一，而包内同时存在：
 """
 
 from .nodes import (
+    MKAdaptiveLongestEdge,
     MKAdaptiveMegapixels,
     MKAnySwitch,
     MKFastGroupsBypasser,
@@ -40,6 +41,7 @@ NODE_CLASS_MAPPINGS = {
     "MK_PromptLibrary": MKPromptLibrary,
     "MK_ImageCrop": MKImageCrop,
     "MK_AdaptiveMegapixels": MKAdaptiveMegapixels,
+    "MK_AdaptiveLongestEdge": MKAdaptiveLongestEdge,
     "MK_LoraLoaderModelOnly": MKLoraLoaderModelOnly,
     "MK_SaveImage": MKSaveImage,
 }
@@ -57,6 +59,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_PromptLibrary": "MK-提示词大全",
     "MK_ImageCrop": "MK-图像裁剪",
     "MK_AdaptiveMegapixels": "MK-自适应百万像素",
+    "MK_AdaptiveLongestEdge": "MK-自适应最长边",
     "MK_LoraLoaderModelOnly": "MK-Lora加载器",
     "MK_SaveImage": "MK-图像保存",
 }
