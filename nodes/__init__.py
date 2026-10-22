@@ -14,6 +14,8 @@ from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
 from .load_image import MKLoadImage
+from .image_merge_mask import MKImageMergeMask
+from .mask_crop import MKCropRestore, MKMaskCrop
 from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
 from .prompt_library import MKPromptLibrary
@@ -31,6 +33,9 @@ NODE_CLASSES = [
     MKPromptPreset,
     MKPromptLibrary,
     MKImageCrop,
+    MKImageMergeMask,
+    MKMaskCrop,
+    MKCropRestore,
     MKAdaptiveMegapixels,
     MKAdaptiveLongestEdge,
     MKLoraLoaderModelOnly,
@@ -49,6 +54,9 @@ __all__ = [
     "MKPromptPreset",
     "MKPromptLibrary",
     "MKImageCrop",
+    "MKImageMergeMask",
+    "MKMaskCrop",
+    "MKCropRestore",
     "MKAdaptiveMegapixels",
     "MKAdaptiveLongestEdge",
     "MKLoraLoaderModelOnly",

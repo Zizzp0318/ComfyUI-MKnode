@@ -1148,6 +1148,183 @@ if le_loc:
           le_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveLongestEdge"],
           f"{le_loc.get('display_name')!r}")
 
+print("=== 19. 遮罩裁剪 / 裁剪恢复（MK_MaskCrop / MK_CropRestore，V1）===")
+from Comfyui_MKnode.nodes.mask_crop import MKMaskCrop, MKCropRestore  # noqa: E402
+
+mc_it = MKMaskCrop.INPUT_TYPES()["required"]
+cr_it = MKCropRestore.INPUT_TYPES()
+print("  MaskCrop 输入:", list(mc_it))
+print("  MaskCrop 输出:", MKMaskCrop.RETURN_TYPES, MKMaskCrop.RETURN_NAMES)
+print("  CropRestore 输入:", list(cr_it["required"]), "| 可选:", list(cr_it.get("optional", {})))
+
+check("  MK_MaskCrop 已注册", "MK_MaskCrop" in pkg.NODE_CLASS_MAPPINGS)
+check("  MK_CropRestore 已注册", "MK_CropRestore" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-遮罩裁剪 / MK-裁剪恢复",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MaskCrop") == "MK-遮罩裁剪"
+      and pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_CropRestore") == "MK-裁剪恢复")
+check("  分类都是 MK节点",
+      MKMaskCrop.CATEGORY == "MK节点" and MKCropRestore.CATEGORY == "MK节点")
+check("  裁剪节点输出 SEAM/IMAGE/MASK",
+      MKMaskCrop.RETURN_TYPES == ("SEAM", "IMAGE", "MASK")
+      and MKMaskCrop.RETURN_NAMES == ("接缝", "裁剪图像", "裁剪遮罩"))
+check("  恢复节点消费 SEAM 并输出 IMAGE",
+      cr_it["required"]["接缝"][0] == "SEAM" and MKCropRestore.RETURN_TYPES == ("IMAGE",))
+check("  恢复节点有 3 个可选输入",
+      list(cr_it.get("optional", {})) == ["裁剪遮罩", "背景图像", "颜色还原强度"],
+      str(list(cr_it.get("optional", {}))))
+check("  参数默认值与源节点一致（1.4 / 原像素 / 1024 / 8）",
+      mc_it["扩展系数上"][1]["default"] == 1.4 and mc_it["输出尺寸"][1]["default"] == "原像素"
+      and mc_it["自定义宽"][1]["default"] == 1024 and mc_it["倍数取整"][1]["default"] == 8)
+check("  输入都带 tooltip",
+      all(isinstance(v[1], dict) and v[1].get("tooltip") for v in mc_it.values()),
+      str([k for k, v in mc_it.items() if not (isinstance(v[1], dict) and v[1].get("tooltip"))]))
+
+# ── 行为：造一张 256x256 的图 + 120x80 的遮罩框 ──
+_mc_img = _torch.from_numpy(
+    (np.random.default_rng(7).integers(30, 220, (256, 256, 3), dtype=np.uint8).astype(np.float32) / 255.0)
+)[None, ...]
+_mc_mask_np = np.zeros((256, 256), dtype=np.float32)
+_mc_mask_np[80:160, 60:180] = 1.0  # 高 80、宽 120
+_mc_mask = _torch.from_numpy(_mc_mask_np)[None, ...]
+
+_crop = MKMaskCrop()
+_restore = MKCropRestore()
+
+_seam, _c_img, _c_mask = _crop.裁剪图像(
+    _mc_img, _mc_mask, False, 1.4, 1.4, 1.4, 1.4, "原像素", 1024, 1024, 1
+)
+print("  裁剪输出:", tuple(_c_img.shape[1:3]), "| 裁剪区域:", _seam["裁剪区域"])
+check("  接缝里记了原像素", _seam["原像素"] == (256, 256), str(_seam["原像素"]))
+check("  接缝里记了遮罩白色区域", (_seam["遮罩白色区域宽"], _seam["遮罩白色区域高"]) == (120, 80),
+      f"{_seam['遮罩白色区域宽']}x{_seam['遮罩白色区域高']}")
+# 最短边 80 → 扩展量 int(80×0.4)=32（浮点会得到 31）；区域 120+2×31=182, 80+2×31=142
+check("  裁剪尺寸与扩展量一致",
+      (_c_img.shape[2], _c_img.shape[1]) == (182, 142), f"{_c_img.shape[2]}x{_c_img.shape[1]}")
+check("  裁剪遮罩里有主体", float(_c_mask.max()) > 0.9)
+
+_seam8, _c_img8, _ = _crop.裁剪图像(_mc_img, _mc_mask, False, 1.4, 1.4, 1.4, 1.4, "原像素", 1024, 1024, 8)
+check("  倍数取整到 8 的倍数",
+      _c_img8.shape[2] % 8 == 0 and _c_img8.shape[1] % 8 == 0,
+      f"{_c_img8.shape[2]}x{_c_img8.shape[1]}")
+
+_, _sq, _ = _crop.裁剪图像(_mc_img, _mc_mask, False, 1.4, 1.4, 1.4, 1.4, "原像素1：1", 1024, 1024, 8)
+check("  1：1 模式输出正方形", _sq.shape[1] == _sq.shape[2], f"{_sq.shape[2]}x{_sq.shape[1]}")
+
+_, _cu, _ = _crop.裁剪图像(_mc_img, _mc_mask, False, 1.4, 1.4, 1.4, 1.4, "自定义宽高", 320, 256, 8)
+check("  自定义宽高生效", (_cu.shape[2], _cu.shape[1]) == (320, 256), f"{_cu.shape[2]}x{_cu.shape[1]}")
+
+# 遮罩填孔
+_holed = _mc_mask_np.copy()
+_holed[100:140, 90:150] = 0.0
+_holed_t = _torch.from_numpy(_holed)[None, ...]
+_, _, _m_no = _crop.裁剪图像(_mc_img, _holed_t, False, 1.4, 1.4, 1.4, 1.4, "原像素", 1024, 1024, 1)
+_, _, _m_yes = _crop.裁剪图像(_mc_img, _holed_t, True, 1.4, 1.4, 1.4, 1.4, "原像素", 1024, 1024, 1)
+check("  遮罩填充把孔洞补上", float(_m_yes.mean()) > float(_m_no.mean()) + 0.01,
+      f"{float(_m_no.mean()):.3f} -> {float(_m_yes.mean()):.3f}")
+
+# ── 行为：恢复 ──
+_out = _restore.恢复图像(_seam, _c_img, 5, 5)[0]
+check("  恢复后尺寸回到原图", tuple(_out.shape[1:3]) == (256, 256), str(tuple(_out.shape[1:3])))
+check("  原样贴回与原图一致", (_out - _mc_img).abs().max().item() < 0.02,
+      str((_out - _mc_img).abs().max().item()))
+
+_red = _torch.zeros_like(_c_img)
+_red[..., 0] = 1.0
+_out_red = _restore.恢复图像(_seam, _red, 5, 5)[0]
+_top, _bottom, _left, _right = _seam["裁剪区域"]
+_center = _out_red[0, (_top + _bottom) // 2, (_left + _right) // 2]
+check("  遮罩内被替换", float(_center[0]) > 0.8 and float(_center[1]) < 0.4,
+      str([round(float(v), 3) for v in _center]))
+check("  遮罩外保持原图", _torch.allclose(_out_red[0, 2, 2], _mc_img[0, 2, 2], atol=0.02))
+
+# 背景图尺寸不符应报错
+_bg_bad = None
+try:
+    _restore.恢复图像(_seam, _c_img, 5, 5, None, _torch.zeros((1, 64, 64, 3)), 0.0)
+except Exception as exc:  # noqa: BLE001
+    _bg_bad = exc
+check("  背景图尺寸不符时报错", isinstance(_bg_bad, ValueError), type(_bg_bad).__name__)
+
+print("=== 20. 图像合并（遮罩）（MK_ImageMergeMask，V1）===")
+from Comfyui_MKnode.nodes.image_merge_mask import MKImageMergeMask  # noqa: E402
+
+mg_it = MKImageMergeMask.INPUT_TYPES()
+print("  输入:", list(mg_it["required"]), "| 可选:", list(mg_it.get("optional", {})))
+print("  输出:", MKImageMergeMask.RETURN_TYPES, MKImageMergeMask.RETURN_NAMES)
+
+check("  已注册", "MK_ImageMergeMask" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-图像合并（遮罩）",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_ImageMergeMask") == "MK-图像合并（遮罩）",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_ImageMergeMask"))
+check("  分类为 MK节点", MKImageMergeMask.CATEGORY == "MK节点")
+check("  单输出 IMAGE", MKImageMergeMask.RETURN_TYPES == ("IMAGE",))
+check("  输入含 透明度/遮罩扩展/模糊半径/匹配图像大小",
+      set(["背景图", "覆盖图", "透明度", "遮罩扩展", "模糊半径", "匹配图像大小"])
+      <= set(mg_it["required"]), str(list(mg_it["required"])))
+check("  遮罩是可选项", "遮罩" in mg_it.get("optional", {}), str(list(mg_it.get("optional", {}))))
+check("  参数默认值与源节点一致（1.0/0/0/False）",
+      mg_it["required"]["透明度"][1]["default"] == 1.0
+      and mg_it["required"]["遮罩扩展"][1]["default"] == 0
+      and mg_it["required"]["模糊半径"][1]["default"] == 0
+      and mg_it["required"]["匹配图像大小"][1]["default"] is False)
+
+# ── 行为 ──
+def _solid(h, w, rgb):
+    arr = np.zeros((h, w, 3), dtype=np.float32)
+    arr[..., 0], arr[..., 1], arr[..., 2] = rgb
+    return _torch.from_numpy(arr)[None, ...]
+
+def _mbox(h, w, box):
+    m = np.zeros((h, w), dtype=np.float32)
+    t, b, l, r = box
+    m[t:b, l:r] = 1.0
+    return _torch.from_numpy(m)[None, ...]
+
+_mg = MKImageMergeMask()
+_RED, _BLUE = (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+_mg_bg, _mg_ov = _solid(64, 64, _RED), _solid(16, 16, _BLUE)
+
+_mg_out = _mg.merge_images(_mg_bg, _mg_ov, 1.0, 0, 0, True)[0]
+check("  整块覆盖（拉伸 + 无遮罩）",
+      _torch.allclose(_mg_out[..., :3], _torch.tensor(_BLUE), atol=0.02)
+      and tuple(_mg_out.shape[1:3]) == (64, 64))
+check("  输出是 4 通道（与源节点一致）", _mg_out.shape[-1] == 4, str(_mg_out.shape[-1]))
+
+_mg_mask = _mbox(64, 64, (0, 64, 0, 32))  # 左半
+_mg_out = _mg.merge_images(_mg_bg, _mg_ov, 1.0, 0, 0, True, _mg_mask)[0]
+check("  遮罩内是覆盖图、遮罩外是背景",
+      _torch.allclose(_mg_out[0, 32, 4, :3], _torch.tensor(_BLUE), atol=0.02)
+      and _torch.allclose(_mg_out[0, 32, 60, :3], _torch.tensor(_RED), atol=0.02))
+
+_mg_out0 = _mg.merge_images(_mg_bg, _mg_ov, 0.0, 0, 0, True)[0]
+check("  透明度 0 → 直接输出背景", _torch.allclose(_mg_out0[..., :3], _torch.tensor(_RED), atol=0.02))
+
+_mg_small = _mbox(64, 64, (28, 36, 28, 36))
+_mg_base = _mg.merge_images(_mg_bg, _mg_ov, 1.0, 0, 0, True, _mg_small)[0]
+_mg_grown = _mg.merge_images(_mg_bg, _mg_ov, 1.0, 6, 0, True, _mg_small)[0]
+_mg_shrunk = _mg.merge_images(_mg_bg, _mg_ov, 1.0, -4, 0, True, _mg_small)[0]
+_blue_count = lambda t: int((t[..., 2] > 0.5).sum())
+check("  遮罩扩展变大 / 负值变小",
+      _blue_count(_mg_grown) > _blue_count(_mg_base) > _blue_count(_mg_shrunk),
+      f"{_blue_count(_mg_grown)}>{_blue_count(_mg_base)}>{_blue_count(_mg_shrunk)}")
+
+_mg_soft = _mg.merge_images(_mg_bg, _mg_ov, 1.0, 0, 6, True, _mg_small)[0]
+check("  模糊后出现过渡色", 0.15 < float(_mg_soft[0, 32, 26, 2]) < 0.9,
+      str(round(float(_mg_soft[0, 32, 26, 2]), 3)))
+
+# 不拉伸：保持原尺寸居中；无遮罩时四周透明（源节点行为）
+_mg_center = _mg.merge_images(_mg_bg, _mg_ov, 1.0, 0, 0, False)[0]
+check("  不拉伸：中心是覆盖图",
+      _torch.allclose(_mg_center[0, 32, 32, :3], _torch.tensor(_BLUE), atol=0.02))
+check("  不拉伸 + 无遮罩：四周透明（alpha=0，源节点行为）",
+      float(_mg_center[0, 2, 2, 3]) < 0.02, str(round(float(_mg_center[0, 2, 2, 3]), 3)))
+
+_mg_mcenter = _mbox(32, 32, (12, 20, 12, 20))
+_mg_center2 = _mg.merge_images(_mg_bg, _mg_ov, 1.0, 0, 0, False, _mg_mcenter)[0]
+check("  不拉伸 + 遮罩：遮罩内覆盖、外是背景",
+      _torch.allclose(_mg_center2[0, 32, 32, :3], _torch.tensor(_BLUE), atol=0.02)
+      and _torch.allclose(_mg_center2[0, 2, 2, :3], _torch.tensor(_RED), atol=0.02))
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")

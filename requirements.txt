@@ -1,4 +1,7 @@
-# 本包所有节点都只用 ComfyUI 自带依赖（torch / numpy / Pillow / aiohttp），
+# 本包绝大多数节点只用 ComfyUI 自带依赖（torch / numpy / Pillow / scipy / aiohttp），
 # 无需额外安装。
 #
-# 保留此文件是为了让 README 里的 `pip install -r requirements.txt` 依然可用。
+# 例外：MK-遮罩裁剪 / MK-裁剪恢复 用到 OpenCV（cv2）。ComfyUI 本体的 requirements.txt
+# 并没有强制安装它（只有个别可选模块会 import），所以这里显式声明，避免干净环境里
+# 这两个节点直接变红。已经装过 opencv-python 的环境 pip 会自动跳过。
+opencv-python>=4.5
