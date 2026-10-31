@@ -10,6 +10,7 @@ from .adaptive_longest_edge import MKAdaptiveLongestEdge
 from .adaptive_megapixels import MKAdaptiveMegapixels
 from .any_switch import MKAnySwitch
 from .fast_groups import MKFastGroupsBypasser, MKFastGroupsMuter
+from .gallery import MKFacePicker, MKGarmentPicker, MKPosePicker
 from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
@@ -40,6 +41,9 @@ NODE_CLASSES = [
     MKAdaptiveLongestEdge,
     MKLoraLoaderModelOnly,
     MKSaveImage,
+    MKPosePicker,
+    MKGarmentPicker,
+    MKFacePicker,
 ]
 
 __all__ = [
@@ -61,4 +65,7 @@ __all__ = [
     "MKAdaptiveLongestEdge",
     "MKLoraLoaderModelOnly",
     "MKSaveImage",
+    "MKPosePicker",
+    "MKGarmentPicker",
+    "MKFacePicker",
 ]

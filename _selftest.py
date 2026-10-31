@@ -1325,6 +1325,104 @@ check("  不拉伸 + 遮罩：遮罩内覆盖、外是背景",
       _torch.allclose(_mg_center2[0, 32, 32, :3], _torch.tensor(_BLUE), atol=0.02)
       and _torch.allclose(_mg_center2[0, 2, 2, :3], _torch.tensor(_RED), atol=0.02))
 
+print("=== 21. 图库（姿态库/服装库/脸模库，迁移自 MK_Gallery）===")
+import io
+import tempfile
+from pathlib import Path  # noqa: E402
+
+from Comfyui_MKnode.mkg import library, paths, store  # noqa: E402
+from Comfyui_MKnode.nodes.gallery import (  # noqa: E402
+    MKFacePicker,
+    MKGarmentPicker,
+    MKPosePicker,
+    _resolve_seed,
+)
+
+check("  三个节点已注册", all(k in pkg.NODE_CLASS_MAPPINGS for k in ("MKPosePicker", "MKGarmentPicker", "MKFacePicker")))
+check("  显示名正确",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MKPosePicker") == "MK-姿态库"
+      and pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MKGarmentPicker") == "MK-服装库"
+      and pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MKFacePicker") == "MK-脸模库")
+check("  分类是 MK_Gallery", all(
+      cls.CATEGORY == "MK_Gallery" for cls in (MKPosePicker, MKGarmentPicker, MKFacePicker)))
+check("  输出 IMAGE", all(cls.RETURN_TYPES == ("IMAGE",) for cls in (MKPosePicker, MKGarmentPicker, MKFacePicker)))
+
+_it = MKPosePicker.INPUT_TYPES()["required"]
+print("  PosePicker 输入:", list(_it))
+check("  输入含 模式/姿态/分类/种子",
+      set(_it) == {"模式", "姿态", "分类", "种子"}, str(list(_it)))
+check("  模式下拉三选",
+      list(_it["模式"][0]) == ["固定选中", "全库随机", "范围内随机"], str(list(_it["模式"][0])))
+
+# 数据目录：默认应落在 user/Comfyui_MKnode/mk_gallery
+_root_str = str(paths.user_root())
+print("  图库数据目录:", _root_str)
+check("  数据目录已迁到 Comfyui_MKnode/mk_gallery",
+      _root_str.endswith("Comfyui_MKnode" + os.sep + "mk_gallery")
+      and "default" not in _root_str.split(os.sep), _root_str)
+
+# 前端契约
+import os as _os  # noqa: E402
+_wd = _os.path.join(os.path.dirname(pkg.__file__), "web")
+for _f in ("gallery-core.js", "mk-pose.js", "mk-face.js", "mk-garment.js"):
+    check(f"  前端文件存在 web/{_f}", _os.path.isfile(_os.path.join(_wd, _f)))
+_gc = open(_os.path.join(_wd, "gallery-core.js"), encoding="utf-8").read() if _os.path.isfile(_os.path.join(_wd, "gallery-core.js")) else ""
+check("  gallery-core 导出 defineGallery", "export function defineGallery" in _gc)
+check("  三个入口各自注册扩展", "MKPosePicker" in _gc or "MKPosePicker" in open(_os.path.join(_wd, "mk-pose.js"), encoding="utf-8").read())
+
+# IS_CHANGED：随机 + 种子 -1 要强制重跑（NaN），固定选中复用缓存
+check("  固定选中 IS_CHANGED 复用缓存", MKPosePicker.IS_CHANGED(模式="固定选中", 分类="全部", 种子=-1) == "")
+_nan_val = MKPosePicker.IS_CHANGED(模式="全库随机", 分类="全部", 种子=-1)
+check("  随机且种子 -1 时 IS_CHANGED 返回 NaN（每次重跑）", _nan_val != _nan_val, str(_nan_val))
+check("  固定种子 IS_CHANGED 可复现",
+      MKPosePicker.IS_CHANGED(模式="全库随机", 分类="全部", 种子=42) == "seed=42|全库随机|全部")
+
+# _resolve_seed
+_s1, _a1 = _resolve_seed(-1)
+check("  种子 -1 走系统熵", _a1 is True and 0 <= _s1 < 2 ** 31, f"{_s1}/{_a1}")
+_s2, _a2 = _resolve_seed(42)
+check("  种子 >=0 原样返回", _s2 == 42 and _a2 is False)
+_s3, _a3 = _resolve_seed("不是数字")
+check("  非数字种子按随机处理", _a3 is True)
+
+# ── 隔离的取图行为：临时目录里造一个库 ──
+_old_root = paths._root_cache
+_tmp = Path(tempfile.mkdtemp(prefix="mk_gallery_test_"))
+paths._root_cache = _tmp
+store._cache.clear()
+try:
+    paths.ensure_dirs("pose")
+    _buf = io.BytesIO()
+    Image.new("RGB", (64, 48), (200, 80, 40)).save(_buf, "PNG")
+    _saved, _failed = store.add_many("pose", [("姿态 01.png", _buf.getvalue())], name="站姿 01", cat="站姿")
+    check("  导入一张图成功", len(_saved) == 1 and not _failed, f"saved={_saved} failed={_failed}")
+
+    _idx = library.index("pose")
+    check("  索引 total=1 且分类登记", _idx["total"] == 1 and _idx["categories"][0]["name"] == "站姿",
+          f"{_idx['total']}/{_idx['categories']}")
+
+    _out = MKPosePicker().pick("固定选中", "站姿 01", "全部", -1)
+    check("  固定选中出图且尺寸正确", tuple(_out["result"][0].shape) == (1, 48, 64, 3),
+          str(tuple(_out["result"][0].shape)))
+    check("  回传 picked 信息", _out["ui"]["picked"][0]["name"] == "站姿 01")
+
+    _r1 = MKPosePicker().pick("全库随机", "", "全部", 42)
+    _r2 = MKPosePicker().pick("全库随机", "", "全部", 42)
+    check("  随机模式同种子可复现",
+          _r1["ui"]["picked"][0]["seed"] == 42 and _r1["ui"]["picked"][0]["name"] == _r2["ui"]["picked"][0]["name"])
+
+    # 空库 / 找不到 → 中文报错
+    from Comfyui_MKnode.mkg.errors import GalleryMissing  # noqa: E402
+    _err = None
+    try:
+        MKPosePicker().pick("固定选中", "不存在的姿态", "全部", -1)
+    except GalleryMissing as exc:
+        _err = str(exc)
+    check("  找不到时抛中文 GalleryMissing", _err is not None and "重新选" in _err, (_err or "")[:40])
+finally:
+    paths._root_cache = _old_root
+    store._cache.clear()
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")

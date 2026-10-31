@@ -21,7 +21,10 @@ from .nodes import (
     MKImageMergeMask,
     MKCropRestore,
     MKMaskCrop,
+    MKFacePicker,
+    MKGarmentPicker,
     MKImageSelector,
+    MKPosePicker,
     MKLoadImage,
     MKLoraLoaderModelOnly,
     MKPromptConcat,
@@ -31,6 +34,12 @@ from .nodes import (
 )
 
 WEB_DIRECTORY = "./web"
+
+# 图库：注册 /mkposes /mkgarments /mkfaces 路由，并准备用户素材目录
+from . import gallery_api  # noqa: E402,F401
+from .mkg import bootstrap  # noqa: E402
+
+bootstrap.ensure_userdata()
 
 NODE_CLASS_MAPPINGS = {
     "MK_LoadImage": MKLoadImage,
@@ -50,6 +59,9 @@ NODE_CLASS_MAPPINGS = {
     "MK_AdaptiveLongestEdge": MKAdaptiveLongestEdge,
     "MK_LoraLoaderModelOnly": MKLoraLoaderModelOnly,
     "MK_SaveImage": MKSaveImage,
+    "MKPosePicker": MKPosePicker,
+    "MKGarmentPicker": MKGarmentPicker,
+    "MKFacePicker": MKFacePicker,
 }
 
 # V3 节点的显示名以 Schema 内的 display_name 为准，这里保持一致
@@ -71,6 +83,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_AdaptiveLongestEdge": "MK-自适应最长边",
     "MK_LoraLoaderModelOnly": "MK-Lora加载器",
     "MK_SaveImage": "MK-图像保存",
+    "MKPosePicker": "MK-姿态库",
+    "MKGarmentPicker": "MK-服装库",
+    "MKFacePicker": "MK-脸模库",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
