@@ -1370,6 +1370,12 @@ _gc = open(_os.path.join(_wd, "gallery-core.js"), encoding="utf-8").read() if _o
 check("  gallery-core 导出 defineGallery", "export function defineGallery" in _gc)
 check("  三个入口各自注册扩展", "MKPosePicker" in _gc or "MKPosePicker" in open(_os.path.join(_wd, "mk-pose.js"), encoding="utf-8").read())
 
+# v3.1：缩略图右上角 × 去掉（只保留右键删除）；取图方式/分类筛选由原生 select 换成自绘下拉
+check("  缩略图不再渲染 .gp-del 删除按钮", '"gp-del"' not in _gc and "gp-del" not in _gc)
+check("  无原生 select（取图方式/分类已自绘下拉）", "<select" not in _gc)
+check("  自绘下拉就位", all(k in _gc for k in ("gp-menu", "renderModeMenu", "renderCatSelMenu", "toggleMenu")))
+check("  版本标记更新到 mk-v3.1", 'const VERSION = "mk-v3.1"' in _gc)
+
 # IS_CHANGED：随机 + 种子 -1 要强制重跑（NaN），固定选中复用缓存
 check("  固定选中 IS_CHANGED 复用缓存", MKPosePicker.IS_CHANGED(模式="固定选中", 分类="全部", 种子=-1) == "")
 _nan_val = MKPosePicker.IS_CHANGED(模式="全库随机", 分类="全部", 种子=-1)

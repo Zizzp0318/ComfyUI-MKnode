@@ -31,7 +31,7 @@ const PREVIEW_MIN = 120;
 const PREVIEW_MAX = 460;
 const MIN_CELL = 58;
 
-const VERSION = "mk-v3.0";
+const VERSION = "mk-v3.1";
 
 const CSS = `
 .gp-root{
@@ -62,13 +62,29 @@ const CSS = `
 .gp-stage-ctrl span{flex:0 0 auto;color:#fff;font-size:11px;opacity:.85;pointer-events:none}
 .gp-stage-range{flex:1 1 auto;min-width:0;height:14px;accent-color:var(--gp-ac);cursor:pointer}
 .gp-tools{display:flex;gap:4px}
-.gp-tools select,.gp-tools input{height:26px;border-radius:6px;border:1px solid var(--gp-line);
+.gp-tools .gp-sel-wrap{flex:0 0 96px}
+.gp-tools .gp-cat-sel,.gp-tools input{height:26px;border-radius:6px;border:1px solid var(--gp-line);
   background:var(--gp-panel);color:var(--gp-fg);font-size:12px;padding:0 6px;min-width:0}
-.gp-tools select{flex:0 0 96px}
+.gp-tools .gp-cat-sel{width:100%;display:flex;align-items:center;justify-content:space-between;
+  text-align:left;overflow:hidden;white-space:nowrap;cursor:pointer}
+.gp-tools .gp-cat-sel::after{content:"▾";opacity:.55;font-size:10px}
 .gp-tools input{flex:1 1 auto}
 .gp-tools input::placeholder{color:var(--gp-dim)}
-.gp-tools input:focus,.gp-tools select:focus{outline:1px solid var(--gp-ac);outline-offset:-1px}
-.gp-tools select:disabled{opacity:.55;cursor:default}
+.gp-tools input:focus,.gp-tools .gp-cat-sel:focus{outline:1px solid var(--gp-ac);outline-offset:-1px}
+.gp-tools .gp-cat-sel:disabled{opacity:.55;cursor:default}
+/* 通用下拉：原生 select 在画布里弹不出/会被裁切，列表自己画（和导入框的分类菜单同理） */
+.gp-sel-wrap{position:relative;min-width:0}
+.gp-menu{position:absolute;z-index:9;left:0;top:calc(100% + 4px);min-width:100%;max-height:240px;
+  overflow:auto;display:flex;flex-direction:column;gap:1px;padding:3px;border:1px solid var(--gp-line);
+  border-radius:6px;background:var(--gp-panel);box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.gp-sel-wrap--foot .gp-menu{top:auto;bottom:calc(100% + 4px)}
+.gp-menu[hidden]{display:none}
+.gp-menu-item{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:4px 7px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap}
+.gp-menu-item:hover{background:rgba(79,140,255,.18)}
+.gp-menu-item.is-on{color:var(--gp-ac)}
+.gp-menu-item em{font-style:normal;color:var(--gp-dim);font-size:11px}
+.gp-menu-empty{padding:4px 7px;font-size:11px;opacity:.5}
 .gp-btn{flex:0 0 auto;height:26px;padding:0 9px;border-radius:6px;border:1px solid var(--gp-line);
   background:var(--gp-panel);color:var(--gp-fg);font-size:12px;cursor:pointer}
 .gp-btn:hover{border-color:var(--gp-ac)}
@@ -83,15 +99,8 @@ const CSS = `
 .gp-cell img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .gp-cell:hover{border-color:var(--gp-ac)}
 .gp-cell[data-on="1"]{border-color:var(--gp-ac);box-shadow:0 0 0 2px rgba(79,140,255,.4)}
-/* 删除：平时不占视觉，悬浮才露出 ×；点它就地把格子换成「删除 / 取消」两块，
-   不用系统确认框（原生 confirm 会挡住整个画布，还会让浏览器焦点跑掉） */
-.gp-del{position:absolute;right:2px;top:2px;z-index:2;width:18px;height:18px;padding:0;
-  display:flex;align-items:center;justify-content:center;border:0;border-radius:4px;
-  background:rgba(12,14,18,.62);color:#fff;font-size:13px;line-height:1;cursor:pointer;
-  opacity:0;transition:opacity .12s}
-.gp-cell:hover .gp-del,.gp-cell:focus-within .gp-del{opacity:1}
-.gp-del:hover{background:#e5484d}
-.gp-cell[data-arm="1"] .gp-del{opacity:0;pointer-events:none}
+/* 删除入口只保留右键：右键格子 → 就地换成「删除 / 取消」两块确认。
+   不在缩略图右上角放 ×，避免悬浮误触、也少一个视觉干扰 */
 /* 压暗但别压死：要能认出「删的是不是这张」 */
 .gp-cell[data-arm="1"] img{opacity:.55}
 .gp-ask{position:absolute;inset:0;z-index:2;display:none;flex-direction:column;justify-content:center;
@@ -109,8 +118,10 @@ const CSS = `
 .gp-foot{flex:0 0 auto;display:flex;align-items:center;gap:6px;color:var(--gp-dim);font-size:11px;min-height:20px}
 .gp-count{flex:0 0 auto;padding:0;border:0;background:none;color:var(--gp-dim);font:inherit;cursor:pointer}
 .gp-count:hover{color:var(--gp-ac)}
-.gp-mode{flex:0 0 auto;height:18px;border-radius:4px;border:1px solid var(--gp-line);
-  background:var(--gp-panel);color:var(--gp-fg);font-size:11px;padding:0 2px;cursor:pointer}
+.gp-sel-wrap--foot{flex:0 0 auto}
+.gp-mode{display:inline-flex;align-items:center;gap:3px;height:18px;border-radius:4px;border:1px solid var(--gp-line);
+  background:var(--gp-panel);color:var(--gp-fg);font-size:11px;padding:0 5px;cursor:pointer}
+.gp-mode::after{content:"▾";opacity:.55;font-size:9px}
 .gp-mode:focus{outline:1px solid var(--gp-ac);outline-offset:-1px}
 .gp-msg{flex:1 1 auto;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gp-ver{flex:0 0 auto;opacity:.35}
@@ -289,7 +300,10 @@ export function defineGallery(opts) {
 				</div>
 			</div>
 			<div class="gp-tools">
-				<select class="gp-cat-sel" title="按分类筛选"></select>
+				<div class="gp-sel-wrap">
+					<button class="gp-cat-sel" type="button" title="按分类筛选">全部</button>
+					<div class="gp-menu" hidden></div>
+				</div>
 				<input class="gp-search" type="text" placeholder="搜索名称 / 分类">
 				<button class="gp-btn gp-imp" type="button"
 					title="导入${itemLabel}图（点这里选图，或按 Ctrl+V 粘贴、把图片拖进面板）">导入</button>
@@ -298,9 +312,10 @@ export function defineGallery(opts) {
 			<div class="gp-grid"></div>
 			<div class="gp-foot">
 				<button class="gp-count" type="button" title="刷新（改了 img 目录后点这里）"></button>
-				<select class="gp-mode" title="取图方式">
-					${MODES.map((m) => `<option value="${m}">${m}</option>`).join("")}
-				</select>
+				<div class="gp-sel-wrap gp-sel-wrap--foot">
+					<button class="gp-mode" type="button" title="取图方式">${MODE_FIXED}</button>
+					<div class="gp-menu" hidden></div>
+				</div>
 				<span class="gp-msg"></span>
 				<span class="gp-ver" title="插件版本标记，用于确认前端脚本已更新">${VERSION}</span>
 			</div>
@@ -342,6 +357,8 @@ export function defineGallery(opts) {
 		const grid = root.querySelector(".gp-grid");
 		const countBtn = root.querySelector(".gp-count");
 		const modeSel = root.querySelector(".gp-mode");
+		const catSelMenu = root.querySelector(".gp-tools .gp-menu");
+		const modeSelMenu = root.querySelector(".gp-foot .gp-menu");
 		const msgEl = root.querySelector(".gp-msg");
 
 		// 选图对话框不上屏，点「选择文件…」再叫出来
@@ -545,7 +562,7 @@ export function defineGallery(opts) {
 			for (const widget of [modeWidget, itemWidget, catWidget, seedWidget]) {
 				showWidget(widget, false);
 			}
-			modeSel.value = modeWidget.value;
+			modeSel.textContent = modeWidget.value;
 			node.graph?.setDirtyCanvas(true, true);
 		}
 
@@ -631,22 +648,65 @@ export function defineGallery(opts) {
 				found = ALL_INDEX;
 				setWidget(catWidget, ALL);
 			}
-			catSel.replaceChildren();
-			const add = (value, text) => {
-				const opt = document.createElement("option");
-				opt.value = String(value);
-				opt.textContent = text;
-				catSel.append(opt);
-			};
-			add(ALL_INDEX, `${ALL} ${st.db.items.length}`);
-			st.db.categories.forEach((entry, index) => {
-				add(index, `${entry.name} ${entry.count}`);
-			});
-			catSel.value = String(found);
-			// 全库随机不看分类，下拉锁住，免得用户以为筛选生效了
+			// 按钮上只显示当前筛选项；下拉列表在点开时再按最新数据现生成
+			catSel.textContent = cat === ALL ? `${ALL} ${st.db.items.length}` : `${cat} ${catCount(cat)}`;
+			// 全库随机不看分类，按钮锁住，免得用户以为筛选生效了
 			const lock = modeWidget.value === MODE_RANDOM_ALL;
 			catSel.disabled = lock;
 			catSel.title = lock ? "全库随机时忽略分类筛选" : "按分类筛选";
+			if (lock) closeMenu(catSelMenu);
+		}
+
+		function closeMenu(menu) {
+			menu.hidden = true;
+		}
+		function toggleMenu(button, menu, render) {
+			if (menu.hidden) {
+				render();
+				menu.hidden = false;
+			} else {
+				closeMenu(menu);
+			}
+		}
+
+		// 取图方式下拉：固定选中 / 范围内随机 / 全库随机
+		function renderModeMenu() {
+			modeSelMenu.replaceChildren();
+			for (const m of MODES) {
+				const item = document.createElement("div");
+				item.className = "gp-menu-item" + (m === modeWidget.value ? " is-on" : "");
+				item.textContent = m;
+				item.onclick = () => {
+					closeMenu(modeSelMenu);
+					setWidget(modeWidget, m);
+					syncFromWidgets();
+				};
+				modeSelMenu.append(item);
+			}
+		}
+
+		// 分类筛选下拉：全部 + 各分类（带数量）
+		function renderCatSelMenu() {
+			catSelMenu.replaceChildren();
+			const add = (name, count) => {
+				const item = document.createElement("div");
+				item.className = "gp-menu-item" + (name === currentCategory() ? " is-on" : "");
+				item.textContent = name;
+				if (count != null) {
+					const num = document.createElement("em");
+					num.textContent = String(count);
+					item.append(num);
+				}
+				item.onclick = () => {
+					closeMenu(catSelMenu);
+					setWidget(catWidget, name);
+					renderCatSel();
+					renderGrid();
+				};
+				catSelMenu.append(item);
+			};
+			add(ALL, st.db.items.length);
+			for (const entry of st.db.categories) add(entry.name, entry.count);
 		}
 
 		let gridCols = 0;
@@ -706,18 +766,7 @@ export function defineGallery(opts) {
 				img.draggable = false;
 				img.src = thumbURL(item.file);
 
-				const del = document.createElement("button");
-				del.type = "button";
-				del.className = "gp-del";
-				del.title = "删除这张图";
-				del.setAttribute("aria-label", "删除");
-				del.textContent = "×";
-				del.onclick = (e) => {
-					e.stopPropagation();
-					armDelete(cell);
-				};
-
-				// 格子就那么宽，横排两个按钮会挤成小方块认不出来，所以竖着排
+				// 删除只走右键：右键格子 → 就地换成「删除 / 取消」两块确认
 				const ask = document.createElement("div");
 				ask.className = "gp-ask";
 				const ok = document.createElement("button");
@@ -739,7 +788,7 @@ export function defineGallery(opts) {
 				};
 				ask.append(ok, no);
 
-				cell.append(img, del, ask);
+				cell.append(img, ask);
 				// 待确认时点格子 = 反悔（此时缩略图被压暗，点到的其实是确认层）
 				cell.onclick = () => {
 					if (cell.dataset.arm === "1") {
@@ -1248,19 +1297,17 @@ export function defineGallery(opts) {
 		node.onRemoved = function () {
 			document.removeEventListener("paste", onPaste);
 			document.removeEventListener("keydown", onArmKeyDown);
+			document.removeEventListener("pointerdown", onMenuPointerDown);
 			window.removeEventListener("wheel", onWheel, { capture: true });
 			cancelAnimationFrame(gridRaf);
 			return prevRemoved?.apply(this, arguments);
 		};
 
 		// ---------- 工具栏 ----------
-		catSel.onchange = () => {
-			const index = Number(catSel.value);
-			const name = index === ALL_INDEX ? ALL : st.db?.categories[index]?.name || ALL;
-			setWidget(catWidget, name);
-			renderCatSel();
-			renderGrid();
-		};
+		catSel.addEventListener("click", (e) => {
+			e.stopPropagation();
+			toggleMenu(catSel, catSelMenu, renderCatSelMenu);
+		});
 
 		let searchTimer = null;
 		searchInput.oninput = () => {
@@ -1271,10 +1318,22 @@ export function defineGallery(opts) {
 			}, 130);
 		};
 
-		modeSel.onchange = () => {
-			setWidget(modeWidget, modeSel.value);
-			syncFromWidgets();
+		modeSel.addEventListener("click", (e) => {
+			e.stopPropagation();
+			toggleMenu(modeSel, modeSelMenu, renderModeMenu);
+		});
+
+		// 点面板外（画布 / 别处）收起下拉；面板内点别处也一起收
+		const menuPairs = [
+			[catSel, catSelMenu],
+			[modeSel, modeSelMenu],
+		];
+		const onMenuPointerDown = (e) => {
+			for (const [btn, menu] of menuPairs) {
+				if (!menu.hidden && !btn.contains(e.target) && !menu.contains(e.target)) closeMenu(menu);
+			}
 		};
+		document.addEventListener("pointerdown", onMenuPointerDown);
 		countBtn.onclick = () => {
 			refresh(null)
 				.then((db) => setNotice(`已刷新，共 ${db.total} ${unit}`))
@@ -1341,7 +1400,7 @@ export function defineGallery(opts) {
 			}
 			syncing = true;
 			try {
-				modeSel.value = modeWidget.value;
+				modeSel.textContent = modeWidget.value;
 				const item = st.db.byLabel.get(itemWidget.value);
 				if (item && item !== st.sel) {
 					st.sel = item;
