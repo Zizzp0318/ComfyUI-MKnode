@@ -21,6 +21,7 @@ from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
 from .prompt_library import MKPromptLibrary
 from .prompt_preset import MKPromptPreset
+from .qwen_pe import MKQwenImage21PromptEnhancer
 from .save_image import MKSaveImage
 from .tiled_upscale import MKTiledUpscale, MKTiledUpscaleStitch
 
@@ -34,6 +35,7 @@ NODE_CLASSES = [
     MKPromptConcat,
     MKPromptPreset,
     MKPromptLibrary,
+    MKQwenImage21PromptEnhancer,
     MKImageCrop,
     MKImageMergeMask,
     MKMaskCrop,
@@ -60,6 +62,7 @@ __all__ = [
     "MKPromptConcat",
     "MKPromptPreset",
     "MKPromptLibrary",
+    "MKQwenImage21PromptEnhancer",
     "MKImageCrop",
     "MKImageMergeMask",
     "MKMaskCrop",
