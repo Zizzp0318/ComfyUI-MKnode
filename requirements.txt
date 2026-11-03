@@ -1,7 +1,17 @@
-# 本包绝大多数节点只用 ComfyUI 自带依赖（torch / numpy / Pillow / scipy / aiohttp），
-# 无需额外安装。
+# MK 节点包依赖
 #
-# 例外：MK-遮罩裁剪 / MK-裁剪恢复 用到 OpenCV（cv2）。ComfyUI 本体的 requirements.txt
-# 并没有强制安装它（只有个别可选模块会 import），所以这里显式声明，避免干净环境里
-# 这两个节点直接变红。已经装过 opencv-python 的环境 pip 会自动跳过。
+# ComfyUI 本体（自己的 requirements.txt）已经装了下面这些，这里不重复声明：
+#   torch / torchvision / numpy / Pillow / scipy / aiohttp / transformers / safetensors / psutil / requests
+# 因此本文件只列「ComfyUI 不自带、但本插件某个节点会用到」的包。
+
+# 图像处理：MK-遮罩裁剪 / MK-裁剪恢复 / MK-图像分块 / MK-图片背景移除（优化前景）
 opencv-python>=4.5
+
+# 模型自动下载：MK-图片背景移除（RMBG-2.0 / INSPYRENET / BEN / BEN2）
+huggingface-hub>=0.19.0
+
+# INSPYRENET 抠图后端（MK-图片背景移除 选择该模型时才会真正加载）
+transparent-background>=1.1.2
+
+# BEN / BEN2 抠图后端的骨干网络依赖 timm（transparent-background 也会一并带上，这里显式声明）
+timm>=0.9.0

@@ -7,6 +7,7 @@
 """
 
 from .adaptive_longest_edge import MKAdaptiveLongestEdge
+from .bg_remove import MKBgRemove
 from .adaptive_megapixels import MKAdaptiveMegapixels
 from .any_switch import MKAnySwitch
 from .fast_groups import MKFastGroupsBypasser, MKFastGroupsMuter
@@ -44,6 +45,7 @@ NODE_CLASSES = [
     MKMaskCrop,
     MKCropRestore,
     MKAdaptiveMegapixels,
+    MKBgRemove,
     MKAdaptiveLongestEdge,
     MKLoraLoaderModelOnly,
     MKSaveImage,
@@ -73,6 +75,7 @@ __all__ = [
     "MKMaskCrop",
     "MKCropRestore",
     "MKAdaptiveMegapixels",
+    "MKBgRemove",
     "MKAdaptiveLongestEdge",
     "MKLoraLoaderModelOnly",
     "MKSaveImage",
