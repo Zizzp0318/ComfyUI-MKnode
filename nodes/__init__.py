@@ -21,6 +21,7 @@ from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
 from .prompt_library import MKPromptLibrary
 from .prompt_preset import MKPromptPreset
+from .memory_cleanup import MKRAMCleanup, MKVRAMCleanup
 from .qwen_pe import MKQwenImage21PromptEnhancer
 from .save_image import MKSaveImage
 from .tiled_upscale import MKTiledUpscale, MKTiledUpscaleStitch
@@ -36,6 +37,8 @@ NODE_CLASSES = [
     MKPromptPreset,
     MKPromptLibrary,
     MKQwenImage21PromptEnhancer,
+    MKVRAMCleanup,
+    MKRAMCleanup,
     MKImageCrop,
     MKImageMergeMask,
     MKMaskCrop,
@@ -63,6 +66,8 @@ __all__ = [
     "MKPromptPreset",
     "MKPromptLibrary",
     "MKQwenImage21PromptEnhancer",
+    "MKVRAMCleanup",
+    "MKRAMCleanup",
     "MKImageCrop",
     "MKImageMergeMask",
     "MKMaskCrop",
