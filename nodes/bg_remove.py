@@ -80,11 +80,25 @@ _DEPRECATION_FILTERS = (
 
 @contextlib.contextmanager
 def _quiet_model_warnings():
-    """只在包裹的这段调用里屏蔽模型自带的弃用警告，不影响其它节点的日志。"""
+    """只在包裹的这段调用里屏蔽模型自带的弃用警告，不影响其它节点的日志。
+
+    PyTorch 的 meshgrid 弃用提示是 C++ 层抛的（TORCH_WARN），warnings 过滤器拦不住，
+    所以这里在调用期间给 torch.meshgrid 补上 indexing='ij'（本来就是默认值，结果不变）。
+    """
     with warnings.catch_warnings():
         for message, category in _DEPRECATION_FILTERS:
             warnings.filterwarnings("ignore", message=message, category=category)
-        yield
+        original_meshgrid = torch.meshgrid
+
+        def _meshgrid(*tensors, **kwargs):
+            kwargs.setdefault("indexing", "ij")
+            return original_meshgrid(*tensors, **kwargs)
+
+        torch.meshgrid = _meshgrid
+        try:
+            yield
+        finally:
+            torch.meshgrid = original_meshgrid
 
 
 def _relocate_timm_import(source: str) -> str:
