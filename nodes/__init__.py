@@ -22,6 +22,7 @@ from .prompt_concat import MKPromptConcat
 from .prompt_library import MKPromptLibrary
 from .prompt_preset import MKPromptPreset
 from .save_image import MKSaveImage
+from .tiled_upscale import MKTiledUpscale, MKTiledUpscaleStitch
 
 NODE_CLASSES = [
     MKLoadImage,
@@ -41,6 +42,8 @@ NODE_CLASSES = [
     MKAdaptiveLongestEdge,
     MKLoraLoaderModelOnly,
     MKSaveImage,
+    MKTiledUpscale,
+    MKTiledUpscaleStitch,
     MKPosePicker,
     MKGarmentPicker,
     MKFacePicker,
@@ -65,6 +68,8 @@ __all__ = [
     "MKAdaptiveLongestEdge",
     "MKLoraLoaderModelOnly",
     "MKSaveImage",
+    "MKTiledUpscale",
+    "MKTiledUpscaleStitch",
     "MKPosePicker",
     "MKGarmentPicker",
     "MKFacePicker",

@@ -31,6 +31,8 @@ from .nodes import (
     MKPromptLibrary,
     MKPromptPreset,
     MKSaveImage,
+    MKTiledUpscale,
+    MKTiledUpscaleStitch,
 )
 
 WEB_DIRECTORY = "./web"
@@ -59,6 +61,8 @@ NODE_CLASS_MAPPINGS = {
     "MK_AdaptiveLongestEdge": MKAdaptiveLongestEdge,
     "MK_LoraLoaderModelOnly": MKLoraLoaderModelOnly,
     "MK_SaveImage": MKSaveImage,
+    "MK_TiledUpscale": MKTiledUpscale,
+    "MK_TiledUpscaleStitch": MKTiledUpscaleStitch,
     "MKPosePicker": MKPosePicker,
     "MKGarmentPicker": MKGarmentPicker,
     "MKFacePicker": MKFacePicker,
@@ -83,6 +87,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_AdaptiveLongestEdge": "MK-自适应最长边",
     "MK_LoraLoaderModelOnly": "MK-Lora加载器",
     "MK_SaveImage": "MK-图像保存",
+    "MK_TiledUpscale": "MK-图像分块",
+    "MK_TiledUpscaleStitch": "MK-分块合并",
     "MKPosePicker": "MK-姿态库",
     "MKGarmentPicker": "MK-服装库",
     "MKFacePicker": "MK-脸模库",
