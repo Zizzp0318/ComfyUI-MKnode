@@ -16,12 +16,14 @@ RMBG-2.0（BiRefNet）、INSPYRENET、BEN、BEN2。
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import importlib.util
 import json
 import os
 import sys
 import types
+import warnings
 
 import comfy.model_management as mm
 import folder_paths
@@ -66,6 +68,33 @@ AVAILABLE_MODELS = {
 }
 
 MODEL_DIR = os.path.join(folder_paths.models_dir, "RMBG")
+
+
+# 第三方模型代码里的弃用警告：timm 的旧导入路径、torch.meshgrid 少了 indexing 参数。
+# 它们只影响日志可读性，不影响结果，因此在调用模型前后临时静音。
+_DEPRECATION_FILTERS = (
+    (r".*timm\.models\.layers.*", FutureWarning),
+    (r".*torch\.meshgrid.*", UserWarning),
+)
+
+
+@contextlib.contextmanager
+def _quiet_model_warnings():
+    """只在包裹的这段调用里屏蔽模型自带的弃用警告，不影响其它节点的日志。"""
+    with warnings.catch_warnings():
+        for message, category in _DEPRECATION_FILTERS:
+            warnings.filterwarnings("ignore", message=message, category=category)
+        yield
+
+
+def _relocate_timm_import(source: str) -> str:
+    """把 `from timm.models.layers import ...` 换成新路径，避免每次加载都刷 FutureWarning。
+
+    只有当前 timm 确实提供 timm.layers 时才替换，老版本保持原样。
+    """
+    if importlib.util.find_spec("timm.layers") is None:
+        return source
+    return source.replace("from timm.models.layers import", "from timm.layers import")
 
 
 # --- 通用工具 -----------------------------------------------------------------
@@ -233,12 +262,14 @@ class _RMBGBiRefNet(_ModelCache):
             "attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)",
             "attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.to(attn.dtype).unsqueeze(1).unsqueeze(0)",
         )
+        content = _relocate_timm_import(content)
 
         module_name = f"mk_birefnet_{abs(hash(birefnet_path))}"
         module = types.ModuleType(module_name)
         module.__file__ = birefnet_path
         sys.modules[module_name] = module
-        exec(content, module.__dict__)
+        with _quiet_model_warnings():
+            exec(content, module.__dict__)
 
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
@@ -287,7 +318,7 @@ class _RMBGBiRefNet(_ModelCache):
             mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=(size[1], size[0]), mode="bilinear").squeeze()
             return _tensor2pil(mask)
 
-        with torch.no_grad():
+        with torch.no_grad(), _quiet_model_warnings():
             try:
                 results = to_mask(self.model(batch))
                 return [postprocess(r, s) for r, s in zip(results, sizes)]
@@ -314,7 +345,8 @@ class _Inspyrenet(_ModelCache):
         self.clear()
         import transparent_background
 
-        self.model = transparent_background.Remover()
+        with _quiet_model_warnings():
+            self.model = transparent_background.Remover()
         self.current_model_version = model_name
 
     def process(self, image, model_name: str, params: dict):
@@ -345,7 +377,8 @@ class _BEN(_ModelCache):
         spec = importlib.util.spec_from_file_location(module_name, module_path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+        with _quiet_model_warnings():
+            spec.loader.exec_module(module)
 
         self.model = module.BEN_Base()
         getattr(self.model, self.weights_loader)(os.path.join(folder, self.weights_file))
@@ -363,7 +396,7 @@ class _BEN(_ModelCache):
         resized = original.resize(
             (params["process_res"], int(params["process_res"] * height / width)), Image.LANCZOS
         )
-        with torch.no_grad():
+        with torch.no_grad(), _quiet_model_warnings():
             _, foreground = self.model.inference(resized.convert("RGBA"))
         return foreground.resize((width, height), Image.LANCZOS).split()[-1]
 
@@ -383,7 +416,7 @@ class _BEN2(_BEN):
             resized = original.resize(
                 (params["process_res"], int(params["process_res"] * height / width)), Image.LANCZOS
             )
-            with torch.no_grad():
+            with torch.no_grad(), _quiet_model_warnings():
                 result = self.model.inference([resized.convert("RGBA")])
             if not isinstance(result, list):
                 result = [result]
