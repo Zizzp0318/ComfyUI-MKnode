@@ -21,6 +21,7 @@ import gc
 import importlib.util
 import json
 import os
+import re
 import sys
 import types
 import warnings
@@ -70,49 +71,6 @@ AVAILABLE_MODELS = {
 MODEL_DIR = os.path.join(folder_paths.models_dir, "RMBG")
 
 
-# 第三方模型代码里的弃用警告：timm 的旧导入路径、torch.meshgrid 少了 indexing 参数。
-# 它们只影响日志可读性，不影响结果，因此在调用模型前后临时静音。
-_DEPRECATION_FILTERS = (
-    (r".*timm\.models\.layers.*", FutureWarning),
-    (r".*torch\.meshgrid.*", UserWarning),
-)
-
-
-@contextlib.contextmanager
-def _quiet_model_warnings():
-    """只在包裹的这段调用里屏蔽模型自带的弃用警告，不影响其它节点的日志。
-
-    PyTorch 的 meshgrid 弃用提示是 C++ 层抛的（TORCH_WARN），warnings 过滤器拦不住，
-    所以这里在调用期间给 torch.meshgrid 补上 indexing='ij'（本来就是默认值，结果不变）。
-    """
-    with warnings.catch_warnings():
-        for message, category in _DEPRECATION_FILTERS:
-            warnings.filterwarnings("ignore", message=message, category=category)
-        original_meshgrid = torch.meshgrid
-
-        def _meshgrid(*tensors, **kwargs):
-            kwargs.setdefault("indexing", "ij")
-            return original_meshgrid(*tensors, **kwargs)
-
-        torch.meshgrid = _meshgrid
-        try:
-            yield
-        finally:
-            torch.meshgrid = original_meshgrid
-
-
-def _relocate_timm_import(source: str) -> str:
-    """把 `from timm.models.layers import ...` 换成新路径，避免每次加载都刷 FutureWarning。
-
-    只有当前 timm 确实提供 timm.layers 时才替换，老版本保持原样。
-    """
-    if importlib.util.find_spec("timm.layers") is None:
-        return source
-    return source.replace("from timm.models.layers import", "from timm.layers import")
-
-
-# --- 通用工具 -----------------------------------------------------------------
-
 def _device() -> torch.device:
     return mm.get_torch_device()
 
@@ -142,6 +100,67 @@ def _hex_to_rgba(hex_color: str) -> tuple[int, int, int, int]:
     if len(value) == 8:
         return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16), int(value[6:8], 16))
     raise ValueError(f"背景色格式不对：{hex_color!r}，请用 #RRGGBB 或 #RRGGBBAA。")
+
+
+# 第三方模型代码里的弃用警告：timm 的旧导入路径、torch.meshgrid 少了 indexing 参数。
+# 它们只影响日志可读性，不影响结果，因此在调用模型前后临时静音。
+_DEPRECATION_FILTERS = (
+    (r".*timm\.models\..*", FutureWarning),
+    (r".*torch\.meshgrid.*", UserWarning),
+)
+
+
+@contextlib.contextmanager
+def _quiet_model_warnings():
+    """只在包裹的这段调用里屏蔽模型自带的弃用警告，不影响其它节点的日志。
+
+    PyTorch 的 meshgrid 弃用提示是 C++ 层抛的（TORCH_WARN），warnings 过滤器拦不住，
+    所以这里在调用期间给 torch.meshgrid 补上 indexing='ij'（本来就是默认值，结果不变）。
+    """
+    with warnings.catch_warnings():
+        for message, category in _DEPRECATION_FILTERS:
+            warnings.filterwarnings("ignore", message=message, category=category)
+        original_meshgrid = torch.meshgrid
+
+        def _meshgrid(*tensors, **kwargs):
+            kwargs.setdefault("indexing", "ij")
+            return original_meshgrid(*tensors, **kwargs)
+
+        torch.meshgrid = _meshgrid
+        try:
+            yield
+        finally:
+            torch.meshgrid = original_meshgrid
+
+
+_TIMM_DEPRECATED_IMPORT = re.compile(
+    r"^(?P<indent>[ \t]*)from\s+(?P<module>timm\.models\.\w+)\s+import\s+(?P<names>[^\n(]+?)\s*$",
+    re.MULTILINE,
+)
+
+
+def _relocate_timm_import(source: str) -> str:
+    """把 `from timm.models.<子模块> import ...` 改到新位置，避免导入时刷弃用警告。
+
+    timm 1.x 把 timm.models.layers / registry / helpers 等都标记为弃用，推荐改用
+    `timm.layers` 或 `timm.models`。这里逐个确认目标模块确实提供同名符号后才改写，
+    确认不了就保持原样，不会把代码改坏。
+    """
+
+    def fix(match: re.Match) -> str:
+        indent, module, names = match.group("indent"), match.group("module"), match.group("names")
+        sub = module.rsplit(".", 1)[-1]
+        needed = [item.split()[0] for item in names.split(",") if item.strip()]
+        for target in (f"timm.{sub}", "timm.models"):
+            try:
+                mod = importlib.import_module(target)
+            except Exception:
+                continue
+            if all(hasattr(mod, name) for name in needed):
+                return f"{indent}from {target} import {names}"
+        return match.group(0)
+
+    return _TIMM_DEPRECATED_IMPORT.sub(fix, source)
 
 
 class _ModelCache:
@@ -388,11 +407,13 @@ class _BEN(_ModelCache):
         folder = self.cache_dir(model_name)
         module_path = os.path.join(folder, self.module_file)
         module_name = f"mk_{model_name.lower()}_{abs(hash(module_path))}"
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        module = importlib.util.module_from_spec(spec)
+        with open(module_path, "r", encoding="utf-8") as handle:
+            source = _relocate_timm_import(handle.read())
+        module = types.ModuleType(module_name)
+        module.__file__ = module_path
         sys.modules[module_name] = module
         with _quiet_model_warnings():
-            spec.loader.exec_module(module)
+            exec(compile(source, module_path, "exec"), module.__dict__)
 
         self.model = module.BEN_Base()
         getattr(self.model, self.weights_loader)(os.path.join(folder, self.weights_file))
