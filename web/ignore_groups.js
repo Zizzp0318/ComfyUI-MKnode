@@ -6,6 +6,8 @@
 // 节点本身没有输入输出，全部功能都在这里：
 // 1. 面板：把当前画布的所有编组列成一行一行的开关。只有「至少含一个节点」的组会出现，
 //    组内嵌套的组算作父组成员（父组开关同时作用于子组）；工作流里没有编组时显示提示文案。
+//    子图见「图上下文」一节：节点在子图里就操作那张子图；在根图时默认连子图内部的组
+//    一起列出（显示为「子图名 / 组名」），可用设置里的「包含子图分组」关掉。
 // 2. 开关：打开 = 组内节点恢复启用（mode 0），关闭 = 按设置切成「绕过」Bypass（mode 4）
 //    或「禁用」Mute（mode 2）。
 // 3. 设置弹窗（齿轮按钮 / 右键菜单）：路由控制（绕过/禁用）、关键词筛选、颜色筛选、
@@ -90,8 +92,10 @@ function buildIgnoreGroupsUI(node) {
     let dirty = true;
     let sortOrder = "position";    // position | alphabet
     let colorFilter = "none";
-    let prevVisibleTitles = new Set();
+    let prevVisibleKeys = new Set();
     let uiScale = 1.0;
+    // 是否连子图内部的编组一起列出来（子图里的组挂在另一个 LGraph 上）
+    let includeSubgraphs = true;
 
     if (node.properties) {
         if (node.properties.mk_ig_filter != null) filter = node.properties.mk_ig_filter;
@@ -103,6 +107,7 @@ function buildIgnoreGroupsUI(node) {
         if (node.properties.mk_ig_sort_order != null) sortOrder = node.properties.mk_ig_sort_order;
         if (node.properties.mk_ig_color_filter != null) colorFilter = node.properties.mk_ig_color_filter;
         if (node.properties.mk_ig_ui_scale != null) uiScale = Number(node.properties.mk_ig_ui_scale) || 1.0;
+        if (node.properties.mk_ig_include_subgraphs != null) includeSubgraphs = !!node.properties.mk_ig_include_subgraphs;
     }
 
     function save() {
@@ -116,6 +121,7 @@ function buildIgnoreGroupsUI(node) {
         node.properties.mk_ig_sort_order = sortOrder;
         node.properties.mk_ig_color_filter = colorFilter;
         node.properties.mk_ig_ui_scale = uiScale;
+        node.properties.mk_ig_include_subgraphs = includeSubgraphs;
     }
 
     function _mkIgSyncGroups() {
@@ -128,9 +134,12 @@ function buildIgnoreGroupsUI(node) {
         sortOrder = (node.properties && node.properties.mk_ig_sort_order) || "position";
         colorFilter = (node.properties && node.properties.mk_ig_color_filter) || "none";
         uiScale = (node.properties && node.properties.mk_ig_ui_scale) || 1.0;
+        includeSubgraphs = node.properties && node.properties.mk_ig_include_subgraphs != null
+            ? !!node.properties.mk_ig_include_subgraphs
+            : true;
         lastSig = "";
         lastStateSig = "";
-        prevVisibleTitles = new Set();
+        prevVisibleKeys = new Set();
         _preserveActive = true;
         _lastAppliedScale = -1;
         dirty = true;
@@ -327,38 +336,107 @@ function buildIgnoreGroupsUI(node) {
     }
 
 
-    // ── 分组快照缓存：一次刷新周期里只扫一遍 graph._groups ──
-    let _rgCache = null;
-
-    function rawGroups(invalidate) {
-        if (invalidate) { _rgCache = null; }
-        if (_rgCache) return _rgCache;
-        const g = app.graph;
-        if (!g || !g._groups) { _rgCache = []; return _rgCache; }
-        _rgCache = g._groups.map(gr => {
-            const color = getGroupColor(gr);
-            return {
-                title: (gr.title || "").trim() || "Unnamed",
-                bounds: gBounds(gr),
-                ref: gr,
-                color: color,
-            };
-        });
-        return _rgCache;
+    // ── 图上下文：本节点可能被拖进子图 ──
+    // 子图的组挂在 Subgraph（也是一个 LGraph）的 _groups 上，不在根图上。
+    // 旧实现一律读 app.graph，所以节点进了子图、或组画在子图里时都会「识别不到」。
+    function hostGraph() {
+        return (node && node.graph) || app.graph;
     }
 
-    function invalidateRawGroups() {
-        _rgCache = null;
+    // 图的稳定标识：优先用 LGraph.id，没有就临时分配一个（同一实例始终同 id）
+    const _gidCache = new WeakMap();
+    let _gidSeq = 0;
+    function gidOf(g) {
+        if (!g) return "g0";
+        if (g.id != null) return String(g.id);
+        let id = _gidCache.get(g);
+        if (!id) {
+            id = "g" + (++_gidSeq);
+            _gidCache.set(g, id);
+        }
+        return id;
+    }
+
+    function graphName(g) {
+        const n = (g && g.name ? String(g.name) : "").trim();
+        return n || "子图";
+    }
+
+    // 当前图里「真的被实例化」的子图（递归、去重）。
+    // 只走节点上的 subgraph 引用，所以工作流里没被用到的子图定义不会跑进面板。
+    function descendantSubgraphs(rootG) {
+        const out = [];
+        const seen = new Set();
+        function walk(g, level) {
+            if (!g || level > 8) return;
+            for (const n of (g._nodes || [])) {
+                if (typeof n.isSubgraphNode !== "function" || !n.isSubgraphNode()) continue;
+                const sg = n.subgraph;
+                if (!sg || seen.has(sg)) continue;
+                seen.add(sg);
+                out.push(sg);
+                walk(sg, level + 1);
+            }
+        }
+        walk(rootG, 0);
+        return out;
+    }
+
+    // ── 分组快照缓存：一次刷新周期里只扫一遍各图的 _groups ──
+    let _rgCache = null;
+
+    /**
+     * 收集分组条目。每条自带所属的图（graph）与唯一键（key）：
+     * - 本节点所在图的分组：key = 组名，与旧版本保存的 activeSet 完全兼容；
+     * - 子图里的分组：key = `sg:<图id>:<组名>`，避免与根图同名组撞车，
+     *   面板显示成「子图名 / 组名」。
+     */
+    function rawEntries(invalidate) {
+        if (invalidate) { _rgCache = null; }
+        if (_rgCache) return _rgCache;
+
+        const host = hostGraph();
+        if (!host) { _rgCache = []; return _rgCache; }
+
+        const graphs = [host];
+        if (includeSubgraphs) {
+            for (const sg of descendantSubgraphs(host)) graphs.push(sg);
+        }
+
+        const out = [];
+        graphs.forEach((g, gi) => {
+            const groups = (g && g._groups) || [];
+            if (!groups.length) return;
+            const isHost = (g === host);
+            const gid = gidOf(g);
+            groups.forEach(gr => {
+                const title = (gr.title || "").trim() || "Unnamed";
+                out.push({
+                    title,
+                    label: isHost ? title : `${graphName(g)} / ${title}`,
+                    key: isHost ? title : `sg:${gid}:${title}`,
+                    bounds: gBounds(gr),
+                    ref: gr,
+                    color: getGroupColor(gr),
+                    graph: g,
+                    gid,
+                    order: gi,
+                });
+            });
+        });
+
+        _rgCache = out;
+        return _rgCache;
     }
 
     // 可见分组：过滤空组 + 关键词 + 颜色，再按设置排序
     function visible(cachedAll) {
-        let list = cachedAll || rawGroups();
+        let list = cachedAll || rawEntries();
         if (!cachedAll) list = list.slice(); // 防止修改缓存
         list = list.filter(g => collectNodes(g, list, cachedAll).length > 0);
         if (filter.trim()) {
             const kw = filter.trim().toLowerCase();
-            list = list.filter(g => g.title.toLowerCase().includes(kw));
+            list = list.filter(g => (g.label || g.title).toLowerCase().includes(kw));
         }
         if (colorFilter && colorFilter !== "none") {
             list = list.filter(g => {
@@ -367,7 +445,9 @@ function buildIgnoreGroupsUI(node) {
             });
         }
         if (sortOrder === "position") {
+            // 先按图分组（本图在前，子图按发现顺序），图内再按位置
             list.sort((a, b) => {
+                if (a.order !== b.order) return a.order - b.order;
                 const ax = a.bounds[0], ay = a.bounds[1];
                 const bx = b.bounds[0], by = b.bounds[1];
                 if (ay !== by) return ay - by;
@@ -375,21 +455,22 @@ function buildIgnoreGroupsUI(node) {
             });
         } else {
             list.sort((a, b) =>
-                a.title.localeCompare(b.title, undefined, { sensitivity: "base" })
+                (a.label || a.title).localeCompare(b.label || b.title, undefined, { sensitivity: "base" })
             );
         }
         return list;
     }
 
-    // 组内节点 = 落在组矩形里的节点；嵌套子组的矩形也算（父组包含子组成员）
-    function collectNodes(grp, allGroups, cachedAll) {
-        const g = app.graph;
+    // 组内节点 = 落在组矩形里的节点。只在本组所属的那张图里找，
+    // 嵌套子组的矩形也算（父组包含子组成员）。
+    function collectNodes(grp, allEntries, cachedAll) {
+        const g = grp.graph || hostGraph();
         if (!g || !g._nodes) return [];
-        const all = allGroups || rawGroups();
+        const all = allEntries || rawEntries();
         const pb = grp.bounds;
         const rects = [pb];
         all.forEach(ag => {
-            if (ag.ref !== grp.ref && inside(ag.bounds, pb)) {
+            if (ag.graph === g && ag.ref !== grp.ref && inside(ag.bounds, pb)) {
                 rects.push(ag.bounds);
             }
         });
@@ -399,14 +480,16 @@ function buildIgnoreGroupsUI(node) {
         });
     }
 
-    // 逐层找出所有嵌套子组（用于父组开关联动子组）
+    // 逐层找出所有嵌套子组（用于父组开关联动子组），同样限制在同一张图内
     function getAllNestedGroups(parentGroup) {
-        const all = rawGroups();
+        const all = rawEntries();
+        const g = parentGroup.graph || hostGraph();
         const result = [];
         const visited = new Set();
         visited.add(parentGroup.ref);
         function findNested(parent) {
             all.forEach(ag => {
+                if (ag.graph !== g) return;
                 if (!visited.has(ag.ref) && inside(ag.bounds, parent.bounds)) {
                     visited.add(ag.ref);
                     result.push(ag);
@@ -453,28 +536,29 @@ function buildIgnoreGroupsUI(node) {
     function computeStateSig(list, cachedAll) {
         return list.map(g => {
             const s = getGroupState(g, cachedAll);
-            return g.title + ":" + (s === true ? "1" : s === false ? "0" : "m");
+            return g.key + ":" + (s === true ? "1" : s === false ? "0" : "m");
         }).join("\x00");
     }
 
 
     // 把「外部改动」（别处 ctrl+b/m、新加分组）回灌到 active / activeSet
     function syncExternalState(cachedAll) {
-        if (!app.graph || !app.graph._nodes || app.graph._nodes.indexOf(node) < 0) return false;
+        const host = hostGraph();
+        if (!host || !host._nodes || host._nodes.indexOf(node) < 0) return false;
 
         let changed = false;
 
         if (mode === "default") {
             if (!Array.isArray(activeSet)) return false;
-            const allList = rawGroups();
+            const allList = rawEntries();
             allList.forEach(g => {
                 const gs = getGroupState(g, cachedAll);
-                const isActive = activeSet.includes(g.title);
+                const isActive = activeSet.includes(g.key);
                 if (gs === true && !isActive) {
-                    activeSet.push(g.title);
+                    activeSet.push(g.key);
                     changed = true;
                 } else if (gs === false && isActive) {
-                    activeSet = activeSet.filter(t => t !== g.title);
+                    activeSet = activeSet.filter(t => t !== g.key);
                     changed = true;
                 }
             });
@@ -482,15 +566,15 @@ function buildIgnoreGroupsUI(node) {
             const filteredList = visible(cachedAll);
             if (mode === "always_one") {
                 if (active) {
-                    const grp = filteredList.find(g => g.title === active);
+                    const grp = filteredList.find(g => g.key === active);
                     if (grp && getGroupState(grp, cachedAll) === false) {
                         const nextActive = filteredList.find(g => getGroupState(g, cachedAll) === true);
-                        active = nextActive ? nextActive.title : (filteredList.length ? filteredList[0].title : null);
+                        active = nextActive ? nextActive.key : (filteredList.length ? filteredList[0].key : null);
                         changed = true;
                     } else if (!grp) {
                         if (filteredList.length) {
                             const firstActive = filteredList.find(g => getGroupState(g, cachedAll) === true);
-                            active = firstActive ? firstActive.title : filteredList[0].title;
+                            active = firstActive ? firstActive.key : filteredList[0].key;
                         } else {
                             active = null;
                         }
@@ -500,13 +584,13 @@ function buildIgnoreGroupsUI(node) {
                 if (!active && filteredList.length) {
                     const firstActive = filteredList.find(g => getGroupState(g, cachedAll) === true);
                     if (firstActive) {
-                        active = firstActive.title;
+                        active = firstActive.key;
                         changed = true;
                     }
                 }
             } else if (mode === "at_most_one") {
                 if (active) {
-                    const grp = filteredList.find(g => g.title === active);
+                    const grp = filteredList.find(g => g.key === active);
                     if (grp && getGroupState(grp, cachedAll) === false) {
                         active = null;
                         changed = true;
@@ -518,7 +602,7 @@ function buildIgnoreGroupsUI(node) {
                 if (!active) {
                     for (const g of filteredList) {
                         if (getGroupState(g, cachedAll) === true) {
-                            active = g.title;
+                            active = g.key;
                             changed = true;
                             break;
                         }
@@ -561,7 +645,7 @@ function buildIgnoreGroupsUI(node) {
         if (mountFrame !== null) return;
         mountFrame = requestAnimationFrame(() => {
             mountFrame = null;
-            if (rootEl.isConnected || !app.graph?._nodes?.includes(node)) return;
+            if (rootEl.isConnected || !hostGraph()?._nodes?.includes(node)) return;
             const vueNode = document.querySelector(
                 `.lg-node[data-node-id="${CSS.escape(String(node.id))}"]`
             );
@@ -594,9 +678,10 @@ function buildIgnoreGroupsUI(node) {
         const effectiveColor = nameColor || "#a89961";
         let sig = list.map(g => {
             const isOn = mode === "default"
-                ? (Array.isArray(activeSet) && activeSet.includes(g.title))
-                : g.title === active;
-            return g.title + (isOn ? ":1" : ":0");
+                ? (Array.isArray(activeSet) && activeSet.includes(g.key))
+                : g.key === active;
+            // label 也进签名：子图改名后面板文字要跟着变
+            return (g.label || g.title) + (isOn ? ":1" : ":0");
         }).join("\x00");
         sig += "|" + effectiveColor + "|" + (mode || "") + "|" + uiScale;
         return sig;
@@ -640,8 +725,8 @@ function buildIgnoreGroupsUI(node) {
 
             list.forEach((g) => {
                 const isOn = mode === "default"
-                    ? activeSet.includes(g.title)
-                    : g.title === active;
+                    ? activeSet.includes(g.key)
+                    : g.key === active;
 
                 const row = document.createElement("div");
                 row.className = "mk-ig-row";
@@ -650,7 +735,7 @@ function buildIgnoreGroupsUI(node) {
                 label.className = "mk-ig-label";
                 label.style.color = effectiveColor;
                 label.style.opacity = isOn ? "1" : "0.5";
-                label.textContent = g.title;
+                label.textContent = g.label || g.title;
 
                 const toggle = document.createElement("div");
                 toggle.className = "mk-ig-toggle" + (isOn ? " on" : "");
@@ -665,7 +750,7 @@ function buildIgnoreGroupsUI(node) {
 
                 row.addEventListener("mousedown", (e) => {
                     e.preventDefault(); e.stopPropagation();
-                    handleToggle(g.title);
+                    handleToggle(g.key);
                 });
                 row.addEventListener("pointerdown", (e) => e.stopPropagation());
                 row.addEventListener("wheel", forwardWheelToCanvas, { passive: false });
@@ -706,11 +791,15 @@ function buildIgnoreGroupsUI(node) {
 
     function refresh(forceApply) {
         // 整个刷新周期内只扫一遍分组
-        const cachedAll = rawGroups(true);
+        const cachedAll = rawEntries(true);
+
+        // 顺手把「分组所在的每张图」都挂上变更钩子：子图内部改动也要能触发刷新
+        ensureGraphHooks(hostGraph());
+        cachedAll.forEach(g => ensureGraphHooks(g.graph));
 
         const list = visible(cachedAll);
-        const currentVisibleTitles = new Set(list.map(g => g.title));
-        const sig = list.map(g => g.title).join("\x00");
+        const currentVisibleKeys = new Set(list.map(g => g.key));
+        const sig = list.map(g => g.key).join("\x00");
         const listChanged = (sig !== lastSig);
         lastSig = sig;
 
@@ -722,25 +811,25 @@ function buildIgnoreGroupsUI(node) {
                 cachedAll.forEach(g => {
                     const gs = getGroupState(g, cachedAll);
                     if (gs !== false) {
-                        activeSet.push(g.title);
+                        activeSet.push(g.key);
                     }
                 });
                 stateChanged = true;
             } else {
-                // 分组被改名/删除后，集合里会留死标题，清掉
-                const allTitles = new Set(cachedAll.map(g => g.title));
+                // 分组被改名/删除后，集合里会留死键，清掉
+                const allKeys = new Set(cachedAll.map(g => g.key));
                 const before = activeSet.length;
-                activeSet = activeSet.filter(t => allTitles.has(t));
+                activeSet = activeSet.filter(t => allKeys.has(t));
                 if (activeSet.length !== before) stateChanged = true;
 
                 // 新出现的分组：按它当前的真实状态补进集合（不强行打开）
                 if (listChanged) {
                     list.forEach(g => {
-                        if (!prevVisibleTitles.has(g.title)) {
+                        if (!prevVisibleKeys.has(g.key)) {
                             const gs = getGroupState(g, cachedAll);
-                            const idx = activeSet.indexOf(g.title);
+                            const idx = activeSet.indexOf(g.key);
                             if (gs === true && idx < 0) {
-                                activeSet.push(g.title);
+                                activeSet.push(g.key);
                                 stateChanged = true;
                             } else if (gs === false && idx >= 0) {
                                 activeSet.splice(idx, 1);
@@ -754,16 +843,16 @@ function buildIgnoreGroupsUI(node) {
             if (!_preserveActive) {
                 const hasFilter = !!(filter.trim() || (colorFilter && colorFilter !== "none"));
 
-                if (active && !cachedAll.some(g => g.title === active)) {
-                    active = (mode === "always_one" && list.length) ? list[0].title : null;
+                if (active && !cachedAll.some(g => g.key === active)) {
+                    active = (mode === "always_one" && list.length) ? list[0].key : null;
                     stateChanged = true;
                 }
 
                 if (active && hasFilter) {
-                    const filteredTitles = new Set(list.map(g => g.title));
-                    if (!filteredTitles.has(active)) {
+                    const filteredKeys = new Set(list.map(g => g.key));
+                    if (!filteredKeys.has(active)) {
                         if (mode === "always_one" && list.length) {
-                            active = list[0].title;
+                            active = list[0].key;
                         } else {
                             active = null;
                         }
@@ -772,7 +861,7 @@ function buildIgnoreGroupsUI(node) {
                 }
 
                 if (mode === "always_one" && !active && list.length) {
-                    active = list[0].title;
+                    active = list[0].key;
                     stateChanged = true;
                 }
             }
@@ -785,56 +874,59 @@ function buildIgnoreGroupsUI(node) {
         if (forceApply || stateChanged || listChanged) {
             selfChanging = true;
             try {
+                const touched = new Set();
                 list.forEach(g => {
                     const isOn = mode === "default"
-                        ? activeSet.includes(g.title)
-                        : g.title === active;
+                        ? activeSet.includes(g.key)
+                        : g.key === active;
                     if (isOn) restoreGroup(g, cachedAll);
                     else bypassGroup(g, cachedAll);
+                    touched.add(g.graph || hostGraph());
                 });
-                try { app.graph.change(); } catch (_) {}
+                // 改的可能是子图里的节点，对应的那张图也要记一笔变更
+                markGraphsChanged(touched);
             } finally {
                 selfChanging = false;
             }
         }
 
-        prevVisibleTitles = currentVisibleTitles;
+        prevVisibleKeys = currentVisibleKeys;
 
         updateDynamicStyles();
         buildDom(forceApply || stateChanged || listChanged);
     }
 
 
-    function handleToggle(title) {
+    function handleToggle(entryKey) {
         if (mode === "default") {
             if (!Array.isArray(activeSet)) activeSet = [];
             const list = visible();
-            const grp = list.find(g => g.title === title);
-            const idx = activeSet.indexOf(title);
+            const grp = list.find(g => g.key === entryKey);
+            const idx = activeSet.indexOf(entryKey);
             const turnOn = idx < 0;
 
             if (turnOn) {
-                if (!activeSet.includes(title)) activeSet.push(title);
+                if (!activeSet.includes(entryKey)) activeSet.push(entryKey);
                 // 打开父组时把嵌套子组一起打开，否则子组会保持关闭、面板看起来对不上
                 if (grp) {
                     getAllNestedGroups(grp).forEach(ng => {
-                        if (!activeSet.includes(ng.title)) activeSet.push(ng.title);
+                        if (!activeSet.includes(ng.key)) activeSet.push(ng.key);
                     });
                 }
             } else {
                 const offSet = new Set();
-                offSet.add(title);
+                offSet.add(entryKey);
                 if (grp) {
-                    getAllNestedGroups(grp).forEach(ng => offSet.add(ng.title));
+                    getAllNestedGroups(grp).forEach(ng => offSet.add(ng.key));
                 }
                 activeSet = activeSet.filter(t => !offSet.has(t));
             }
         } else if (mode === "always_one") {
-            if (active === title) return;
-            active = title;
+            if (active === entryKey) return;
+            active = entryKey;
         } else {
-            if (active === title) { active = null; }
-            else { active = title; }
+            if (active === entryKey) { active = null; }
+            else { active = entryKey; }
         }
         save();
         refresh(true);
@@ -849,6 +941,7 @@ function buildIgnoreGroupsUI(node) {
 
         let _initialSettingsScale = uiScale;
         let _needsNodeHeightRefresh = false;
+        let sgCheck = null;
 
         const overlay = document.createElement("div");
         overlay.id = "mk_ig_overlay";
@@ -864,7 +957,7 @@ function buildIgnoreGroupsUI(node) {
         Object.assign(pop.style, {
             position: "fixed",
             left: Math.min(x, innerWidth - 280) + "px",
-            top: Math.min(y, innerHeight - 620) + "px",
+            top: Math.min(y, innerHeight - 680) + "px",
             background: "#2a2a2a", border: "1px solid #555",
             borderRadius: "8px", padding: "14px 18px",
             zIndex: "99999", minWidth: "250px",
@@ -883,7 +976,7 @@ function buildIgnoreGroupsUI(node) {
             if (_needsNodeHeightRefresh) {
                 _needsNodeHeightRefresh = false;
                 node.size = [calcWidth(), calcHeight()];
-                app.graph.change();
+                markGraphsChanged([hostGraph()]);
             }
         }
         _settingsCleanup = closePopup;
@@ -903,8 +996,18 @@ function buildIgnoreGroupsUI(node) {
             const newMode = mSelect.value;
             const newScale = parseFloat(scaleInput.value) || 1.0;
 
+            const wasIncludeSubgraphs = includeSubgraphs;
+            if (sgCheck) includeSubgraphs = !!sgCheck.checked;
+
             uiScale = newScale;
             updateDynamicStyles();
+
+            if (wasIncludeSubgraphs !== includeSubgraphs) {
+                // 分组集合换了（多了/少了子图里的组）：缓存与「上一轮的键」都得清
+                rawEntries(true);
+                lastSig = "";
+                prevVisibleKeys = new Set();
+            }
 
             if (Math.abs(newScale - _initialSettingsScale) > 0.001) {
                 _needsNodeHeightRefresh = true;
@@ -913,20 +1016,20 @@ function buildIgnoreGroupsUI(node) {
             // 切模式时把「当前打开的是哪几组」迁移过去，不要清空成默认
             if (newMode !== mode) {
                 if (newMode === "default") {
-                    activeSet = visible().map(g => g.title);
+                    activeSet = visible().map(g => g.key);
                 } else if (newMode === "always_one") {
                     const fl = visible();
-                    const ft = new Set(fl.map(g => g.title));
+                    const ft = new Set(fl.map(g => g.key));
                     if (activeSet && activeSet.length) {
                         const match = activeSet.find(t => ft.has(t));
-                        active = match || (fl.length ? fl[0].title : null);
+                        active = match || (fl.length ? fl[0].key : null);
                     } else {
-                        active = fl.length ? fl[0].title : null;
+                        active = fl.length ? fl[0].key : null;
                     }
                     activeSet = null;
                 } else {
                     const fl = visible();
-                    const ft = new Set(fl.map(g => g.title));
+                    const ft = new Set(fl.map(g => g.key));
                     if (activeSet && activeSet.length) {
                         const match = activeSet.find(t => ft.has(t));
                         active = match || null;
@@ -941,7 +1044,7 @@ function buildIgnoreGroupsUI(node) {
             } else {
                 if (mode === "always_one" && !active) {
                     const list = visible();
-                    if (list.length) active = list[0].title;
+                    if (list.length) active = list[0].key;
                 }
             }
             save();
@@ -981,6 +1084,24 @@ function buildIgnoreGroupsUI(node) {
         dRow.appendChild(dLblBypass); dRow.appendChild(dLblDisable); pop.appendChild(dRow);
         dRadioBypass.addEventListener("change", applyAll);
         dRadioDisable.addEventListener("change", applyAll);
+
+        // 子图内的编组：默认一起列出来（改的是子图定义，所有实例同步生效）
+        const sgRow = document.createElement("label");
+        sgRow.title = "把子图内部的编组也列出来。开关改的是子图定义，所有实例一起生效。";
+        Object.assign(sgRow.style, {
+            display: "flex", alignItems: "center", gap: "8px",
+            fontSize: "13px", marginBottom: "14px", cursor: "pointer", userSelect: "none",
+        });
+        sgCheck = document.createElement("input");
+        sgCheck.type = "checkbox";
+        sgCheck.checked = !!includeSubgraphs;
+        sgCheck.style.cursor = "pointer";
+        const sgTxt = document.createElement("span");
+        sgTxt.textContent = "包含子图分组";
+        sgRow.appendChild(sgCheck);
+        sgRow.appendChild(sgTxt);
+        pop.appendChild(sgRow);
+        sgCheck.addEventListener("change", applyAll);
 
         const fLabel = document.createElement("div");
         fLabel.textContent = "关键词筛选";
@@ -1048,7 +1169,7 @@ function buildIgnoreGroupsUI(node) {
 
         // 颜色选项从「画布里真实存在的组颜色」里取，避免给一堆用不到的颜色
         function buildColorOptions() {
-            const allRaw = rawGroups();
+            const allRaw = rawEntries();
             const colorMap = new Map();
             allRaw.forEach(g => { const c = g.color || "__transparent__"; if (!colorMap.has(c)) colorMap.set(c, g); });
             const colors = Array.from(colorMap.keys());
@@ -1210,13 +1331,31 @@ function buildIgnoreGroupsUI(node) {
 
     // 画布变更（拖动分组、加节点、撤销…）只打脏标记，真正的比对交给轮询，
     // 否则一次拖动会触发几十次全量扫描。selfChanging 用来忽略本节点的写入。
-    if (app.graph && typeof app.graph.change === "function") {
-        const origGraphChange = app.graph.change;
-        app.graph.change = function () {
+    // 每张图各挂一层：节点在子图里时，改动发生在子图上而不是根图。
+    const _hookedGraphs = new WeakSet();
+
+    function ensureGraphHooks(g) {
+        if (!g || typeof g.change !== "function" || _hookedGraphs.has(g)) return;
+        _hookedGraphs.add(g);
+        const orig = g.change;
+        g.change = function () {
             if (!selfChanging) dirty = true;
-            return origGraphChange.apply(this, arguments);
+            return orig.apply(this, arguments);
         };
     }
+
+    // 标记这些图已变更（历史 / 撤销要记一笔），去重后逐个调用
+    function markGraphsChanged(graphs) {
+        const seen = new Set();
+        (graphs || []).forEach(g => {
+            if (!g || typeof g.change !== "function" || seen.has(g)) return;
+            seen.add(g);
+            try { g.change(); } catch (_) {}
+        });
+    }
+
+    ensureGraphHooks(hostGraph());
+
 
     // 用户手动 ctrl+b / ctrl+m 后，等 ComfyUI 处理完再看
     function onKeyDown(e) {
@@ -1238,6 +1377,9 @@ function buildIgnoreGroupsUI(node) {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
 
+    // 记住上一轮的分组归属图：节点被拖进/拖出子图时整块状态要重来
+    let _lastHost = null;
+
     const timer = setInterval(() => {
         // 节点被删掉：清掉所有挂在 document 上的东西
         if (!node.graph) {
@@ -1251,15 +1393,28 @@ function buildIgnoreGroupsUI(node) {
             return;
         }
 
-        if (!app.graph || !app.graph._nodes || app.graph._nodes.indexOf(node) < 0) return;
+        const host = hostGraph();
+        if (!host || !host._nodes || host._nodes.indexOf(node) < 0) return;
+
+        // 节点换了张图（拖进/拖出子图）：缓存、签名、上一轮可见集合全部作废
+        if (host !== _lastHost) {
+            _lastHost = host;
+            ensureGraphHooks(host);
+            rawEntries(true);
+            lastSig = "";
+            lastStateSig = "";
+            prevVisibleKeys = new Set();
+            _preserveActive = true;
+            dirty = true;
+        }
 
         if (!pageVisible) return;
 
         if (dirty) {
             dirty = false;
-            const cachedAll = rawGroups(true);
+            const cachedAll = rawEntries(true);
             const list = visible(cachedAll);
-            const sig = list.map(g => g.title).join("\x00");
+            const sig = list.map(g => g.key).join("\x00");
             const listChanged = (sig !== lastSig);
             const stateSig = computeStateSig(list, cachedAll);
             const stateChanged = (stateSig !== lastStateSig);
@@ -1275,7 +1430,7 @@ function buildIgnoreGroupsUI(node) {
                     } else {
                         buildDom(true);
                     }
-                    try { app.graph.change(); } catch (_) {}
+                    markGraphsChanged([host]);
                 } finally {
                     selfChanging = false;
                 }

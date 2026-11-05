@@ -1349,6 +1349,16 @@ check("  属性键统一 mk_ig_ 前缀", "mk_ig_filter" in ig_js and "guhai_ig_"
 check("  DOM/CSS 前缀已隔离", "mk-ig-row" in ig_js and "guhai-ig" not in ig_js)
 check("  有定时同步（外部 ctrl+b/m 能被发现）", "setInterval(" in ig_js and "POLL_MS" in ig_js)
 check("  嵌套分组联动", "getAllNestedGroups" in ig_js)
+check("  以「节点所在的图」为准（子图里也能用）",
+      "return (node && node.graph) || app.graph;" in ig_js)
+check("  递归收集子图（isSubgraphNode / subgraph 引用）",
+      "isSubgraphNode" in ig_js and "n.subgraph" in ig_js and "descendantSubgraphs" in ig_js)
+check("  子图分组键带前缀，避免与根图同名组冲突",
+      "sg:${gid}:${title}" in ig_js)
+check("  可关闭「包含子图分组」", "mk_ig_include_subgraphs" in ig_js and "包含子图分组" in ig_js)
+check("  改子图内的组也能记变更（多图 change 钩子）",
+      "markGraphsChanged" in ig_js and "_hookedGraphs" in ig_js)
+check("  节点被拖进/拖出子图后重建缓存", "_lastHost" in ig_js)
 check("  节点删除时清理监听与样式",
       "clearInterval(timer)" in ig_js and "mountObserver.disconnect()" in ig_js)
 check("  无画布绘制/命中钩子",
