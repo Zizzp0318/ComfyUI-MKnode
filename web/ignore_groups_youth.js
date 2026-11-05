@@ -240,9 +240,44 @@ function buildYouthUI(node) {
         };
     }
 
-    // 换色后立刻重画（自绘走 canvas，需要主动标脏）
+    // 颜色深浅决定文字用黑还是白（浅色底上白字看不清）
+    function isLightColor(hex) {
+        if (!hex || hex.length < 7) return false;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 150;
+    }
+
+    // Nodes 2.0（Vue 渲染）下开关是 ToggleGroup 的两个分段按钮，
+    // 选中态写死在样式表里（data-[state=on]:bg-secondary-background），
+    // 不走 canvas 的 drawWidget，所以只能补一段「只作用于本节点」的 CSS。
+    let _colorStyleEl = null;
+    let _colorKey = "";
+
+    function syncColorStyle(force) {
+        const key = `${node.id}|${swColor}`;
+        if (!force && key === _colorKey) return;
+        _colorKey = key;
+
+        if (!_colorStyleEl) {
+            _colorStyleEl = document.createElement("style");
+            document.head.appendChild(_colorStyleEl);
+        }
+        _colorStyleEl.id = "mk-igy-color-" + (node.id ?? "0");
+        const safe = /^#[0-9a-fA-F]{6}$/.test(swColor) ? swColor : "#a89961";
+        const fg = isLightColor(safe) ? "#1b1b1b" : "#ffffff";
+        const sel = `.lg-node[data-node-id="${node.id}"]`;
+        _colorStyleEl.textContent =
+            `${sel} [data-state="on"] {` +
+            ` background-color: ${safe} !important; color: ${fg} !important; }` +
+            `${sel} [data-state="on"]:hover { background-color: ${safe} !important; }`;
+    }
+
+    // 换色后立刻重画 / 重刷样式（canvas 与 Vue 两种渲染各管一条）
     function repaintWidgets() {
         _widgets.forEach(paintToggle);
+        syncColorStyle(true);
         try { node.setDirtyCanvas?.(true, true); } catch (_) {}
         try { app.graph?.setDirtyCanvas?.(true, true); } catch (_) {}
     }
@@ -391,6 +426,7 @@ function buildYouthUI(node) {
 
         prevVisibleKeys = currentVisibleKeys;
         syncWidgets(list);
+        syncColorStyle();
     }
 
 
@@ -789,6 +825,7 @@ function buildYouthUI(node) {
         // 节点被删掉：收摊
         if (!node.graph) {
             clearInterval(timer);
+            if (_colorStyleEl) { _colorStyleEl.remove(); _colorStyleEl = null; }
             document.removeEventListener("visibilitychange", onVisibilityChange);
             document.removeEventListener("keydown", onKeyDown);
             return;
@@ -796,6 +833,9 @@ function buildYouthUI(node) {
 
         const host = hostGraph();
         if (!host || !host._nodes || host._nodes.indexOf(node) < 0) return;
+
+        // node.id 在加入画布后才分配，配色 CSS 的选择器要跟着刷新
+        syncColorStyle();
 
         // 节点被拖进/拖出子图：缓存、签名、widget 全部重来
         if (host !== _lastHost) {
@@ -909,6 +949,7 @@ function buildYouthUI(node) {
 
     // 首屏
     ensureSettingsButton();
+    syncColorStyle(true);
     refresh(false);
     lastStateSig = computeStateSig(visible());
     dirty = false;

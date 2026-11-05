@@ -1409,6 +1409,9 @@ check("  青春版给原生开关套了自绘",
       "function paintToggle" in youth_js and "w.drawWidget = function" in youth_js)
 check("  换色后主动重画画布",
       "function repaintWidgets" in youth_js and "setDirtyCanvas" in youth_js)
+check("  配色兼容 Nodes 2.0（Vue 渲染走作用域 CSS）",
+      "function syncColorStyle" in youth_js and '[data-state="on"]' in youth_js
+      and "data-node-id" in youth_js)
 check("  青春版同样支持子图（共用核心）", "mk_ignore_groups_core.js" in youth_js and "buildEntries" in youth_js)
 
 ig_loc = loc_all.get("MK_IgnoreGroups")
