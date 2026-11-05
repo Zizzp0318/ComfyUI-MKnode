@@ -7,7 +7,7 @@
 // 1. 面板：把当前画布的所有编组列成一行一行的开关。只有「至少含一个节点」的组会出现，
 //    组内嵌套的组算作父组成员（父组开关同时作用于子组）；工作流里没有编组时显示提示文案。
 //    子图见「图上下文」一节：节点在子图里就操作那张子图；在根图时默认连子图内部的组
-//    一起列出（显示为「子图名 / 组名」），可用设置里的「包含子图分组」关掉。
+//    一起列出（行上只显示组名），可用设置里的「包含子图分组」关掉。
 // 2. 开关：打开 = 组内节点恢复启用（mode 0），关闭 = 按设置切成「绕过」Bypass（mode 4）
 //    或「禁用」Mute（mode 2）。
 // 3. 设置弹窗（齿轮按钮 / 右键菜单）：路由控制（绕过/禁用）、关键词筛选、颜色筛选、
@@ -357,11 +357,6 @@ function buildIgnoreGroupsUI(node) {
         return id;
     }
 
-    function graphName(g) {
-        const n = (g && g.name ? String(g.name) : "").trim();
-        return n || "子图";
-    }
-
     // 当前图里「真的被实例化」的子图（递归、去重）。
     // 只走节点上的 subgraph 引用，所以工作流里没被用到的子图定义不会跑进面板。
     function descendantSubgraphs(rootG) {
@@ -388,8 +383,8 @@ function buildIgnoreGroupsUI(node) {
     /**
      * 收集分组条目。每条自带所属的图（graph）与唯一键（key）：
      * - 本节点所在图的分组：key = 组名，与旧版本保存的 activeSet 完全兼容；
-     * - 子图里的分组：key = `sg:<图id>:<组名>`，避免与根图同名组撞车，
-     *   面板显示成「子图名 / 组名」。
+     * - 子图里的分组：key = `sg:<图id>:<组名>`，只用于内部区分，避免与根图同名组撞车；
+     *   面板显示仍然是纯组名。
      */
     function rawEntries(invalidate) {
         if (invalidate) { _rgCache = null; }
@@ -413,7 +408,8 @@ function buildIgnoreGroupsUI(node) {
                 const title = (gr.title || "").trim() || "Unnamed";
                 out.push({
                     title,
-                    label: isHost ? title : `${graphName(g)} / ${title}`,
+                    // 面板只显示组名：不管组在本图还是子图里，都不加前缀
+                    label: title,
                     key: isHost ? title : `sg:${gid}:${title}`,
                     bounds: gBounds(gr),
                     ref: gr,
