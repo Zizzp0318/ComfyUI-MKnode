@@ -1403,6 +1403,12 @@ check("  青春版不挂 DOM 面板", "addDOMWidget(" not in youth_js)
 check("  青春版 widget 不参与序列化", "serialize = false" in youth_js)
 check("  青春版取消 UI 缩放", "UI组件大小" not in youth_js and "ui_scale" not in youth_js)
 check("  青春版保留子图开关", "mk_ig_include_subgraphs" in youth_js)
+check("  青春版开关可改颜色",
+      "mk_ig_switch_color" in youth_js and "开关颜色" in youth_js)
+check("  青春版给原生开关套了自绘",
+      "function paintToggle" in youth_js and "w.drawWidget = function" in youth_js)
+check("  换色后主动重画画布",
+      "function repaintWidgets" in youth_js and "setDirtyCanvas" in youth_js)
 check("  青春版同样支持子图（共用核心）", "mk_ignore_groups_core.js" in youth_js and "buildEntries" in youth_js)
 
 ig_loc = loc_all.get("MK_IgnoreGroups")

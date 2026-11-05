@@ -72,6 +72,9 @@ function buildYouthUI(node) {
     let sortOrder = "position";    // position | alphabet
     let colorFilter = "none";
     let includeSubgraphs = true;
+    // 开关颜色：原生 toggle 只会跟随全局主题（暗色下几乎是黑的），
+    // 这里给每个开关盖一层自绘，让「开」用得上自定义颜色。
+    let swColor = "#a89961";
     let selfChanging = false;
     let dirty = true;
 
@@ -84,6 +87,7 @@ function buildYouthUI(node) {
         if (node.properties.mk_ig_sort_order != null) sortOrder = node.properties.mk_ig_sort_order;
         if (node.properties.mk_ig_color_filter != null) colorFilter = node.properties.mk_ig_color_filter;
         if (node.properties.mk_ig_include_subgraphs != null) includeSubgraphs = !!node.properties.mk_ig_include_subgraphs;
+        if (node.properties.mk_ig_switch_color != null) swColor = node.properties.mk_ig_switch_color;
     }
 
     function save() {
@@ -96,6 +100,7 @@ function buildYouthUI(node) {
         node.properties.mk_ig_sort_order = sortOrder;
         node.properties.mk_ig_color_filter = colorFilter;
         node.properties.mk_ig_include_subgraphs = includeSubgraphs;
+        node.properties.mk_ig_switch_color = swColor;
     }
 
     // 载入工作流 / 撤销后重新读属性
@@ -110,6 +115,7 @@ function buildYouthUI(node) {
         includeSubgraphs = node.properties && node.properties.mk_ig_include_subgraphs != null
             ? !!node.properties.mk_ig_include_subgraphs
             : true;
+        swColor = (node.properties && node.properties.mk_ig_switch_color) || "#a89961";
         lastSig = "";
         lastStateSig = "";
         prevVisibleKeys = new Set();
@@ -176,6 +182,71 @@ function buildYouthUI(node) {
         }).join("\x00");
     }
 
+    function hexToRgba(hex, alpha) {
+        if (!hex || hex.length < 7) return `rgba(120,120,120,${alpha})`;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r},${g},${b},${alpha})`;
+    }
+
+    // 给原生 toggle 换一层皮：行高、点击、序列化都还是原生的，只改「画」。
+    // 原生未开启时是深灰圆点，暗色皮肤下几乎看不出状态；这里改成
+    // 开 = 自定义颜色（半透明底 + 实心圆点），关 = 中性灰。
+    function paintToggle(w) {
+        w.drawWidget = function (ctx, options) {
+            const { width, showText = true } = options || {};
+            const height = this.height;
+            const y = this.y;
+            const margin = (this.constructor && this.constructor.margin) || 10;
+            const on = !!this.value;
+            const x = margin;
+            const bw = width - margin * 2;
+            const radius = height * 0.5;
+            const knobX = x + bw - height * 0.55;
+            const centerY = y + height * 0.5;
+
+            ctx.save();
+
+            ctx.beginPath();
+            ctx.roundRect(x, y, bw, height, radius);
+            ctx.fillStyle = on ? hexToRgba(swColor, 0.32) : "rgba(0,0,0,0.28)";
+            ctx.fill();
+            ctx.strokeStyle = on ? swColor : "rgba(255,255,255,0.20)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            if (showText) {
+                ctx.textBaseline = "middle";
+                ctx.textAlign = "left";
+                ctx.fillStyle = on ? "#ffffff" : "rgba(255,255,255,0.70)";
+                ctx.fillText(this.name, x + height * 0.55, centerY);
+
+                ctx.textAlign = "right";
+                ctx.fillStyle = on ? swColor : "rgba(255,255,255,0.55)";
+                ctx.fillText(
+                    on ? (this.options?.on || "开") : (this.options?.off || "关"),
+                    knobX - height * 0.5,
+                    centerY
+                );
+            }
+
+            ctx.beginPath();
+            ctx.arc(knobX, centerY, height * 0.3, 0, Math.PI * 2);
+            ctx.fillStyle = on ? swColor : "#6b6b6b";
+            ctx.fill();
+
+            ctx.restore();
+        };
+    }
+
+    // 换色后立刻重画（自绘走 canvas，需要主动标脏）
+    function repaintWidgets() {
+        _widgets.forEach(paintToggle);
+        try { node.setDirtyCanvas?.(true, true); } catch (_) {}
+        try { app.graph?.setDirtyCanvas?.(true, true); } catch (_) {}
+    }
+
     // ── 原生 widget：设置按钮 + 每组一个开关 ──
 
     let _widgets = [];      // 由本节点维护的分组开关
@@ -208,6 +279,7 @@ function buildYouthUI(node) {
             if (!w) return;
             w.serialize = false;      // 状态走 properties，不写 widgets_values
             w._mkIgyKey = entry.key;
+            paintToggle(w);           // 自定义配色
             _widgets.push(w);
         });
     }
@@ -644,6 +716,46 @@ function buildYouthUI(node) {
         });
         sSelect.value = sortOrder; pop.appendChild(sSelect);
         sSelect.addEventListener("change", applyAll);
+
+        // 开关颜色（原生 toggle 默认只有主题色，暗色下几乎是黑的）
+        const colorLabel = mkLabel("开关颜色");
+        colorLabel.title = "「开」状态下开关的颜色，暗色皮肤下更容易辨认。";
+        pop.appendChild(colorLabel);
+
+        const colorRow = document.createElement("div");
+        Object.assign(colorRow.style, {
+            display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px",
+        });
+
+        const cInput = document.createElement("input");
+        cInput.type = "color"; cInput.value = swColor;
+        Object.assign(cInput.style, {
+            width: "36px", height: "28px", padding: "0",
+            border: "1px solid #555", borderRadius: "4px", background: "#1a1a1a", cursor: "pointer",
+        });
+
+        const cHex = document.createElement("input");
+        cHex.type = "text"; cHex.value = swColor;
+        Object.assign(cHex.style, {
+            flex: "1", padding: "5px 8px", fontSize: "13px",
+            background: "#1a1a1a", border: "1px solid #555", borderRadius: "4px",
+            color: "#e0e0e0", outline: "none", boxSizing: "border-box",
+        });
+
+        colorRow.appendChild(cInput);
+        colorRow.appendChild(cHex);
+        pop.appendChild(colorRow);
+
+        function applyColor() {
+            swColor = cInput.value;
+            save();
+            repaintWidgets();
+        }
+
+        cInput.addEventListener("input", () => { cHex.value = cInput.value; applyColor(); });
+        cHex.addEventListener("input", () => {
+            if (/^#[0-9a-fA-F]{6}$/.test(cHex.value)) { cInput.value = cHex.value; applyColor(); }
+        });
 
         document.body.appendChild(pop);
         pop.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); });
