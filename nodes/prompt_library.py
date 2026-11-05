@@ -1,7 +1,6 @@
 """MK-提示词大全（MK_PromptLibrary）
 
-以 ``MK-提示词预设管理``（``nodes/prompt_preset.py`` + ``web/prompt_preset.js``）为原型
-派生的**图片化提示词库**节点。相对预设管理节点：
+早期以「MK-提示词预设管理」（该节点已移除）为原型派生的**图片化提示词库**节点。相对原预设管理节点：
 
 取消：
 - 输出端的「数字转中文」（原 ``text_zh_num``），只保留单一 ``text`` 输出；
@@ -26,7 +25,7 @@
     }
 
 存储：
-- 库数据（JSON）复用 ``/mk_prompt_store``（见 ``prompt_preset.py``），key = ``mk_prompt_library``；
+- 库数据（JSON）复用 ``/mk_prompt_store``（见 ``prompt_store.py``），key = ``mk_prompt_library``；
 - 缩略图二进制另走后端资源路由 ``/mk_prompt_asset``，落盘于
   ``<ComfyUI 用户目录>/Comfyui_MKnode/mk_prompt_assets/``（插件目录之外，更新插件不丢数据）。
 """
@@ -42,7 +41,7 @@ from server import PromptServer
 
 # 后端资源路由（前端 web/prompt_library.js 依赖此路径，改动需同步）
 ROUTE_ASSET = "/mk_prompt_asset"
-# 存储子目录名（与 prompt_preset.py 保持一致，落在 ComfyUI 用户目录下）
+# 存储子目录名（与 prompt_store.py 保持一致，落在 ComfyUI 用户目录下）
 _STORE_SUBDIR = "Comfyui_MKnode"
 # 缩略图子目录
 _ASSET_SUBDIR = "mk_prompt_assets"

@@ -807,115 +807,7 @@ if as_loc:
           as_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AnySwitch"],
           f"{as_loc.get('display_name')!r}")
 
-print("=== 14. 禁用多框 / 忽略多框（MK_FastGroups*，V1 空节点）===")
-from Comfyui_MKnode.nodes.fast_groups import (  # noqa: E402
-    MKFastGroupsMuter,
-    MKFastGroupsBypasser,
-)
-
-for cls, node_id, display, off_mode in [
-    (MKFastGroupsMuter, "MK_FastGroupsMuter", "MK-禁用多框", 2),
-    (MKFastGroupsBypasser, "MK_FastGroupsBypasser", "MK-忽略多框", 4),
-]:
-    print(f"  --- {node_id} ---")
-    it = cls.INPUT_TYPES()
-    check(f"  {node_id} 已注册", node_id in pkg.NODE_CLASS_MAPPINGS)
-    check(f"  {node_id} 显示名为 {display}",
-          pkg.NODE_DISPLAY_NAME_MAPPINGS.get(node_id) == display,
-          pkg.NODE_DISPLAY_NAME_MAPPINGS.get(node_id))
-    check(f"  {node_id} 无输入", it["required"] == {}, str(it["required"]))
-    check(f"  {node_id} 无输出（纯 UI 节点）", cls.RETURN_TYPES == (), str(cls.RETURN_TYPES))
-    check(f"  {node_id} 不是输出节点", not getattr(cls, "OUTPUT_NODE", False))
-    check(f"  {node_id} 分类为 MK节点", cls.CATEGORY == "MK节点")
-    check(f"  {node_id} noop 返回空元组", cls().noop() == ())
-    check(f"  {node_id} 关闭模式为 {off_mode}", cls.MODE_OFF == off_mode, str(cls.MODE_OFF))
-    check(f"  {node_id} 开启模式为 0（ALWAYS）", cls.MODE_ON == 0, str(cls.MODE_ON))
-
-# 空节点混在真实 prompt 里不能影响校验
-_prev_maps2 = (dict(_comfy_nodes.NODE_CLASS_MAPPINGS), dict(_comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS))
-try:
-    _comfy_nodes.NODE_CLASS_MAPPINGS.update(pkg.NODE_CLASS_MAPPINGS)
-    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(pkg.NODE_DISPLAY_NAME_MAPPINGS)
-    _fg_prompt = {
-        "1": {"class_type": "EmptyImage",
-              "inputs": {"width": 64, "height": 64, "batch_size": 1, "color": 0}},
-        "2": {"class_type": "MK_FastGroupsMuter", "inputs": {}},
-        "3": {"class_type": "MK_FastGroupsBypasser", "inputs": {}},
-        "4": {"class_type": "MK_SaveImage",
-              "inputs": {"images": ["1", 0], "filename_prefix": "mk_selftest",
-                         "image_format": "PNG", "quality": 95,
-                         "save_metadata": False, "preview_only": True}},
-    }
-    _fg_ok, _fg_err, _fg_partial, _ = asyncio.run(execution.validate_prompt("selftest_fg", _fg_prompt, None))
-finally:
-    _comfy_nodes.NODE_CLASS_MAPPINGS.clear()
-    _comfy_nodes.NODE_CLASS_MAPPINGS.update(_prev_maps2[0])
-    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.clear()
-    _comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(_prev_maps2[1])
-
-print("  validate_prompt ->", _fg_ok, _fg_err)
-check("  空 UI 节点混在 prompt 中校验通过", _fg_ok is True, str(_fg_err))
-check("  空 UI 节点不进入执行列表", "2" not in _fg_partial and "3" not in _fg_partial, str(_fg_partial))
-
-# 前端契约
-fg_js = _read("web/fast_groups.js")
-check("  前端扩展名带包前缀", 'name: "Comfyui_MKnode.FastGroups"' in fg_js)
-check("  同时处理两个节点类型",
-      "MK_FastGroupsMuter: {" in fg_js and "MK_FastGroupsBypasser: {" in fg_js)
-check("  用 addDOMWidget 挂面板（Nodes 2.0 才不空白）", "addDOMWidget(" in fg_js)
-check("  禁用用 mode=2、忽略用 mode=4",
-      "MODE_NEVER = 2" in fg_js and "MODE_BYPASS = 4" in fg_js)
-check("  无画布绘制/命中钩子",
-      all(k not in fg_js for k in ("onDrawBackground", "graph_mouse", "isInsideRectangle")))
-check("  按分组行的 DOM 按钮切换", 'className = "mk-fg-switch"' in fg_js)
-check("  有轮询刷新（分组与状态会变）", "setInterval(" in fg_js and "mkFgRefresh" in fg_js)
-check("  支持宽度自适应（面板高度跟节点）", "mkFgSyncPanelHeight" in fg_js)
-check("  覆盖 onConfigure 且调用基类",
-      "const onConfigure = nodeType.prototype.onConfigure;" in fg_js)
-# 回归：boundingRect 只在「画布画到该节点的那一帧」才更新，切工作流/滚出可视区后会变 [0,0,0,0]。
-# 必须用 measure() 现算，否则所有分组都算不出成员（面板全灰、点了没反应）。
-check("  节点包围盒用 measure() 现算（不依赖每帧缓存）",
-      "typeof node.measure === \"function\"" in fg_js and "node.measure(out, app.canvas?.ctx)" in fg_js)
-check("  分组包围盒优先 getBounding（同步布局 store）",
-      "typeof group?.getBounding === \"function\"" in fg_js)
-check("  面板版本标记存在（便于确认脚本已刷新）",
-      'PANEL_VERSION = "v4"' in fg_js)
-# v4：节点高度按内容自适应，只有一个分组时不再拖一大片空白
-check("  节点高度按内容自适应", "mkFgFitHeight" in fg_js and "mkFgContentHeight" in fg_js)
-check("  内容过高时改为列表内滚动", "MAX_CONTENT_HEIGHT" in fg_js)
-check("  内容没变时不改节点尺寸（不跟手动拉尺寸打架）", "_mkFgFitContent" in fg_js)
-# 性能模型（v3）：分组快照跨面板共享 + TTL、拖动跳过、动作走一次计算
-check("  分组快照跨面板共享（getGroupSnapshot + TTL）",
-      "function getGroupSnapshot()" in fg_js and "SNAPSHOT_TTL" in fg_js)
-check("  拖动/框选时跳过重算", "function isInteracting()" in fg_js and "isInteracting())" in fg_js)
-check("  点击后只按已有成员刷新（不再逐组重算）", "mkFgAfterChange" in fg_js)
-check("  页面在后台时不重算", "document.hidden" in fg_js)
-check("  不再有每面板独立的全量收集函数", "function collectGroups" not in fg_js)
-check("  属性键与上游一致",
-      all(f'{k}:' in fg_js for k in ("matchColors", "matchTitle", "showNav", "showAllGraphs",
-                                     "sort", "customSortAlphabet", "toggleRestriction")))
-# 只检查「代码」里有没有依赖 rgthree：注释里提到上游名字是正常的（说明来源）
-import re as _re  # noqa: E402
-
-fg_code_only = _re.sub(r"/\*[\s\S]*?\*/", "", fg_js)  # 去掉块注释
-fg_code_only = "\n".join(
-    line for line in fg_code_only.splitlines() if not line.strip().startswith("//")
-)
-check("  不引用 rgthree 的任何文件（注释提及不算）",
-      "rgthree" not in fg_code_only.lower().replace("rgthree-comfy", ""))
-
-for node_id in ("MK_FastGroupsMuter", "MK_FastGroupsBypasser"):
-    fg_loc = loc_all.get(node_id)
-    check(f"  语言包含 {node_id}", fg_loc is not None)
-    if fg_loc:
-        check(f"    {node_id} 不翻译不存在的输入输出",
-              not fg_loc.get("inputs") and not fg_loc.get("outputs"),
-              f"{fg_loc.get('inputs')}/{fg_loc.get('outputs')}")
-        check(f"    {node_id} display_name 与注册一致",
-              fg_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS[node_id],
-              f"{fg_loc.get('display_name')!r}")
-
-print("=== 15. Lora加载器（MK_LoraLoaderModelOnly）===")
+print("=== 14. Lora加载器（MK_LoraLoaderModelOnly）===")
 from Comfyui_MKnode.nodes.lora_loader import MKLoraLoaderModelOnly, NONE_OPTION  # noqa: E402
 
 lo_it = MKLoraLoaderModelOnly.INPUT_TYPES()
@@ -977,7 +869,7 @@ if lo_loc:
           lo_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_LoraLoaderModelOnly"],
           f"{lo_loc.get('display_name')!r}")
 
-print("=== 16. 提示词大全：分类排序（前端契约）===")
+print("=== 15. 提示词大全：分类排序（前端契约）===")
 pl_js = _read("web/prompt_library.js")
 check("  有同级上移/下移实现", "function _libMoveNode(lib, id, direction)" in pl_js)
 check("  拖拽与按钮共用同一套编号规则", "function _libApplyCategoryOrder(list)" in pl_js)
@@ -991,7 +883,7 @@ check("  上移/下移后存盘并重绘",
 check("  有按钮样式（平时压暗 / hover 提亮）", ".mk-pl-tree-move" in pl_js)
 check("  分类下拉/移动目标按显示顺序遍历", "for (const node of _libSortNodes(nodes))" in pl_js)
 
-print("=== 17. 自适应百万像素（MK_AdaptiveMegapixels，V3）===")
+print("=== 16. 自适应百万像素（MK_AdaptiveMegapixels，V3）===")
 import torch as _torch  # noqa: E402
 from Comfyui_MKnode.nodes.adaptive_megapixels import (  # noqa: E402
     MKAdaptiveMegapixels,
@@ -1072,7 +964,7 @@ if am_loc:
           am_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveMegapixels"],
           f"{am_loc.get('display_name')!r}")
 
-print("=== 18. 自适应最长边（MK_AdaptiveLongestEdge，V3）===")
+print("=== 17. 自适应最长边（MK_AdaptiveLongestEdge，V3）===")
 from Comfyui_MKnode.nodes.adaptive_longest_edge import (  # noqa: E402
     MKAdaptiveLongestEdge,
     longest_edge_of,
@@ -1148,7 +1040,7 @@ if le_loc:
           le_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveLongestEdge"],
           f"{le_loc.get('display_name')!r}")
 
-print("=== 19. 遮罩裁剪 / 裁剪恢复（MK_MaskCrop / MK_CropRestore，V1）===")
+print("=== 18. 遮罩裁剪 / 裁剪恢复（MK_MaskCrop / MK_CropRestore，V1）===")
 from Comfyui_MKnode.nodes.mask_crop import MKMaskCrop, MKCropRestore  # noqa: E402
 
 mc_it = MKMaskCrop.INPUT_TYPES()["required"]
@@ -1245,7 +1137,7 @@ except Exception as exc:  # noqa: BLE001
     _bg_bad = exc
 check("  背景图尺寸不符时报错", isinstance(_bg_bad, ValueError), type(_bg_bad).__name__)
 
-print("=== 20. 图像合并（遮罩）（MK_ImageMergeMask，V1）===")
+print("=== 19. 图像合并（遮罩）（MK_ImageMergeMask，V1）===")
 from Comfyui_MKnode.nodes.image_merge_mask import MKImageMergeMask  # noqa: E402
 
 mg_it = MKImageMergeMask.INPUT_TYPES()
@@ -1325,7 +1217,7 @@ check("  不拉伸 + 遮罩：遮罩内覆盖、外是背景",
       _torch.allclose(_mg_center2[0, 32, 32, :3], _torch.tensor(_BLUE), atol=0.02)
       and _torch.allclose(_mg_center2[0, 2, 2, :3], _torch.tensor(_RED), atol=0.02))
 
-print("=== 21. 图库（姿态库/服装库/脸模库，迁移自 MK_Gallery）===")
+print("=== 20. 图库（姿态库/服装库/脸模库，迁移自 MK_Gallery）===")
 import io
 import tempfile
 from pathlib import Path  # noqa: E402
@@ -1428,6 +1320,110 @@ try:
 finally:
     paths._root_cache = _old_root
     store._cache.clear()
+
+print("=== 21. 禁用（忽略）多组（MK_IgnoreGroups，V1 纯 UI 节点）===")
+from Comfyui_MKnode.nodes.ignore_groups import MKIgnoreGroups  # noqa: E402
+
+ig_it = MKIgnoreGroups.INPUT_TYPES()
+check("  已注册", "MK_IgnoreGroups" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-禁用（忽略）多组",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups") == "MK-禁用（忽略）多组",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups"))
+check("  无输入", ig_it["required"] == {}, str(ig_it["required"]))
+check("  无输出（纯 UI 节点）", MKIgnoreGroups.RETURN_TYPES == (), str(MKIgnoreGroups.RETURN_TYPES))
+check("  分类为 MK节点", MKIgnoreGroups.CATEGORY == "MK节点")
+check("  执行返回空元组", MKIgnoreGroups().execute() == ())
+
+# 前端契约：面板逻辑全在 web/ignore_groups.js
+ig_js = _read("web/ignore_groups.js")
+check("  前端扩展名带包前缀", 'name: "Comfyui_MKnode.IgnoreGroups"' in ig_js)
+check("  只接管 MK_IgnoreGroups", 'const NODE_TYPE = "MK_IgnoreGroups";' in ig_js)
+check("  用 addDOMWidget 挂面板（Nodes 2.0 才不空白）", "addDOMWidget(" in ig_js)
+check("  绕过用 mode=4、禁用用 mode=2", "n.mode = 4" in ig_js and "n.mode = 2" in ig_js)
+check("  恢复用 mode=0 并清 flags.disabled",
+      "n.mode = 0" in ig_js and "n.flags.disabled = false" in ig_js)
+check("  三档切换模式齐全",
+      all(k in ig_js for k in ('"default"', '"always_one"', '"at_most_one"')))
+check("  两种排序齐全", '"position"' in ig_js and '"alphabet"' in ig_js)
+check("  属性键统一 mk_ig_ 前缀", "mk_ig_filter" in ig_js and "guhai_ig_" not in ig_js)
+check("  DOM/CSS 前缀已隔离", "mk-ig-row" in ig_js and "guhai-ig" not in ig_js)
+check("  有定时同步（外部 ctrl+b/m 能被发现）", "setInterval(" in ig_js and "POLL_MS" in ig_js)
+check("  嵌套分组联动", "getAllNestedGroups" in ig_js)
+check("  节点删除时清理监听与样式",
+      "clearInterval(timer)" in ig_js and "mountObserver.disconnect()" in ig_js)
+check("  无画布绘制/命中钩子",
+      all(k not in ig_js for k in ("onDrawBackground", "graph_mouse", "isInsideMouse")))
+# 只检查「代码」里有没有依赖源插件：注释里写明来源是正常的
+import re as _re  # noqa: E402
+
+ig_code_only = _re.sub(r"/\*[\s\S]*?\*/", "", ig_js)
+ig_code_only = "\n".join(
+    line for line in ig_code_only.splitlines() if not line.strip().startswith("//")
+)
+check("  代码不引用 goohaitools 的任何文件（注释提及来源不算）",
+      "goohaitools" not in ig_code_only.lower())
+
+ig_loc = loc_all.get("MK_IgnoreGroups")
+check("  语言包含 MK_IgnoreGroups", ig_loc is not None)
+if ig_loc:
+    check("  语言包不翻译不存在的输入输出",
+          not ig_loc.get("inputs") and not ig_loc.get("outputs"),
+          f"{ig_loc.get('inputs')}/{ig_loc.get('outputs')}")
+    check("  语言包 display_name 与注册一致",
+          ig_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_IgnoreGroups"],
+          f"{ig_loc.get('display_name')!r}")
+
+
+print("=== 22. 遮罩是否为空（MK_MaskIsEmpty，V3）===")
+import torch as _torch  # noqa: E402
+
+from Comfyui_MKnode.nodes.mask_is_empty import MKMaskIsEmpty  # noqa: E402
+
+_ms = MKMaskIsEmpty.define_schema()
+check("  已注册", "MK_MaskIsEmpty" in pkg.NODE_CLASS_MAPPINGS)
+check("  显示名为 MK-遮罩是否为空",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MaskIsEmpty") == "MK-遮罩是否为空",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MaskIsEmpty"))
+check("  分类为 MK节点", MKMaskIsEmpty.define_schema().category == "MK节点", _ms.category)
+check("  schema node_id 一致", _ms.node_id == "MK_MaskIsEmpty", _ms.node_id)
+check("  输入为 遮罩 + 过滤最小值",
+      [i.id for i in _ms.inputs] == ["mask", "min_area_percent"], str([i.id for i in _ms.inputs]))
+check("  输出为 是否有遮罩（BOOLEAN）",
+      len(_ms.outputs) == 1 and _ms.outputs[0].id == "has_mask", str(_ms.outputs))
+
+
+def _ms_run(mask, thr):
+    return bool(MKMaskIsEmpty.execute(mask, thr).result[0])
+
+
+_ms_empty = _torch.zeros(1, 64, 64)
+_ms_full = _torch.ones(1, 64, 64)
+_ms_sparse = _torch.zeros(1, 100, 100)
+_ms_sparse[0, 0, 0] = 1.0  # 占比 1/10000 = 0.01%
+
+check("  全黑遮罩 -> False（阈值 0）", _ms_run(_ms_empty, 0.0) is False)
+check("  全黑遮罩 -> False（阈值 3）", _ms_run(_ms_empty, 3.0) is False)
+check("  全白遮罩 -> True（阈值 0）", _ms_run(_ms_full, 0.0) is True)
+check("  全白遮罩 -> True（阈值 3）", _ms_run(_ms_full, 3.0) is True)
+check("  单像素：阈值 0 时为 True（不计算面积）", _ms_run(_ms_sparse, 0.0) is True)
+check("  单像素：阈值 3 时为 False（面积不足）", _ms_run(_ms_sparse, 3.0) is False)
+_ms_batch = _torch.stack([_torch.zeros(32, 32), _torch.ones(32, 32)])  # 整批占比 50%
+check("  批次按整批统计：50% >= 3% -> True", _ms_run(_ms_batch, 3.0) is True)
+check("  批次按整批统计：50% < 60% -> False", _ms_run(_ms_batch, 60.0) is False)
+check("  空张量不触发除零", _ms_run(_torch.zeros(0, 8, 8), 0.0) is False)
+
+_ms_loc = loc_all.get("MK_MaskIsEmpty")
+check("  语言包含 MK_MaskIsEmpty", _ms_loc is not None)
+if _ms_loc:
+    check("  语言包输入 id 与 schema 一致",
+          set(_ms_loc.get("inputs", {})) == {"mask", "min_area_percent"},
+          str(sorted(_ms_loc.get("inputs", {}))))
+    check("  语言包输出按索引 0 翻译", set(_ms_loc.get("outputs", {})) == {"0"},
+          str(sorted(_ms_loc.get("outputs", {}))))
+    check("  语言包 display_name 与注册一致",
+          _ms_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_MaskIsEmpty"],
+          f"{_ms_loc.get('display_name')!r}")
+
 
 print()
 if fails:

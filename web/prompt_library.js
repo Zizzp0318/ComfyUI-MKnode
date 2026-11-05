@@ -4,7 +4,7 @@ import { api } from "../../scripts/api.js";
 // ══════════════════════════════════════════════════════════════
 //  MK-提示词大全 / MK Prompt Library —— 前端
 //
-//  以 web/prompt_preset.js（MK-提示词预设管理）为原型派生的「图片化提示词库」。
+//  早期以「MK-提示词预设管理」的前端为原型派生的「图片化提示词库」（该预设节点已移除）。
 //
 //  相对预设管理节点：
 //   1. 「提示词预设管理」按钮 -> 「提示词预设选择」；
@@ -18,7 +18,7 @@ import { api } from "../../scripts/api.js";
 //  数据亦独立（key = mk_prompt_library），两节点提示词库互不影响。
 // ══════════════════════════════════════════════════════════════
 
-// ── 内联：界面语言检测（同 prompt_preset.js） ──
+// ── 内联：界面语言检测 ──
 function mkLang() {
     let v = "";
     try { v = app?.ui?.settings?.settingsLookup?.["Comfy.Locale"]?.value || ""; } catch (e) {}
@@ -31,7 +31,7 @@ function mkLang() {
 }
 function _pl_(zh, en) { return mkLang() === "en" ? en : zh; }
 
-// ── 内联：存储层（复用后端 /mk_prompt_store，见 nodes/prompt_preset.py） ──
+// ── 内联：存储层（复用后端 /mk_prompt_store，见 nodes/prompt_store.py） ──
 const MK_PL_UI_KEY = "mk_prompt_library_ui_state";
 const MK_PL_GEOMETRY_KEYS = ["mk_prompt_library_picker_geometry"];
 const _plPending = new Map();

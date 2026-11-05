@@ -43,34 +43,6 @@
       }
     }
   },
-  "MK_PromptPreset": {
-    "display_name": "MK-提示词预设管理",
-    "description": "带提示词预设管理的文本框：可选择预设一键填入提示词，支持历史记录与收藏；第二输出把文本中的数字转写成中文读法。",
-    "inputs": {
-      "text": {
-        "name": "文本",
-        "tooltip": "要输出与转写的文本，可从下拉预设一键填入。"
-      },
-      "preset_category": {
-        "name": "提示词类型",
-        "tooltip": "预设的大分类，由「提示词预设管理」维护。"
-      },
-      "preset_name": {
-        "name": "提示词细分",
-        "tooltip": "该分类下的具体预设，选中后自动填入文本框。"
-      }
-    },
-    "outputs": {
-      "0": {
-        "name": "原文",
-        "tooltip": "原始文本（不变）"
-      },
-      "1": {
-        "name": "数字转中文",
-        "tooltip": "把文本中的阿拉伯数字转写成中文读法后的文本"
-      }
-    }
-  },
   "MK_PromptLibrary": {
     "display_name": "MK-提示词大全",
     "description": "图片化提示词库：点击「提示词预设选择」，在缩略图网格中点选图片即可把对应提示词填入文本框；支持多级分类、上传配图（只存压缩缩略图）、编辑与移动。",
@@ -117,15 +89,29 @@
       }
     }
   },
-  "MK_FastGroupsMuter": {
-    "display_name": "MK-禁用多框",
-    "description": "把当前工作流里的所有分组列成开关，点一下即可把该分组内的节点整体禁用（Mute）或恢复启用。支持按位置/名称排序、按标题或颜色过滤、最多一个/始终一个等开关规则。",
-    "inputs": {},
-    "outputs": {}
+  "MK_MaskIsEmpty": {
+    "display_name": "MK-遮罩是否为空",
+    "description": "判断遮罩里有没有有效内容，输出布尔值；「过滤最小值」是有效面积占全图的百分比，用来滤掉零星噪点。",
+    "inputs": {
+      "mask": {
+        "name": "遮罩",
+        "tooltip": "要判断的遮罩。多帧批次按整批一起统计。"
+      },
+      "min_area_percent": {
+        "name": "过滤最小值",
+        "tooltip": "有效面积占全图的百分比阈值（像素值 > 0.5 才算有效），设为 0 时只要有一个有效像素就输出 True。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "是否有遮罩",
+        "tooltip": "True = 遮罩非空（有效面积达到阈值）；False = 空遮罩或有效面积不足。"
+      }
+    }
   },
-  "MK_FastGroupsBypasser": {
-    "display_name": "MK-忽略多框",
-    "description": "把当前工作流里的所有分组列成开关，点一下即可把该分组内的节点整体忽略（Bypass）或恢复启用。与禁用不同，被忽略的节点会把输入原样透传给输出。",
+  "MK_IgnoreGroups": {
+    "display_name": "MK-禁用（忽略）多组",
+    "description": "把当前工作流的所有编组列成开关，一键把整组节点切到「启用 / 绕过（Bypass）/ 禁用（Mute）」。支持关键词与颜色筛选、按位置或首字母排序、始终/最多开启 1 组，以及面板缩放与主题色。",
     "inputs": {},
     "outputs": {}
   },

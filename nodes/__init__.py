@@ -10,18 +10,20 @@ from .adaptive_longest_edge import MKAdaptiveLongestEdge
 from .bg_remove import MKBgRemove
 from .adaptive_megapixels import MKAdaptiveMegapixels
 from .any_switch import MKAnySwitch
-from .fast_groups import MKFastGroupsBypasser, MKFastGroupsMuter
 from .gallery import MKFacePicker, MKGarmentPicker, MKPosePicker
+from .ignore_groups import MKIgnoreGroups
 from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
 from .load_image import MKLoadImage
 from .image_merge_mask import MKImageMergeMask
 from .mask_crop import MKCropRestore, MKMaskCrop
+from .mask_is_empty import MKMaskIsEmpty
 from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
 from .prompt_library import MKPromptLibrary
-from .prompt_preset import MKPromptPreset
+# 存储路由（MK-提示词大全前端使用 /mk_prompt_store），import 即注册
+from . import prompt_store  # noqa: F401
 from .memory_cleanup import MKRAMCleanup, MKVRAMCleanup
 from .qwen_pe import MKQwenImage21PromptEnhancer
 from .save_image import MKSaveImage
@@ -32,10 +34,8 @@ NODE_CLASSES = [
     MKImageSelector,
     MKImageCompare,
     MKAnySwitch,
-    MKFastGroupsMuter,
-    MKFastGroupsBypasser,
+    MKIgnoreGroups,
     MKPromptConcat,
-    MKPromptPreset,
     MKPromptLibrary,
     MKQwenImage21PromptEnhancer,
     MKVRAMCleanup,
@@ -43,6 +43,7 @@ NODE_CLASSES = [
     MKImageCrop,
     MKImageMergeMask,
     MKMaskCrop,
+    MKMaskIsEmpty,
     MKCropRestore,
     MKAdaptiveMegapixels,
     MKBgRemove,
@@ -62,10 +63,8 @@ __all__ = [
     "MKImageSelector",
     "MKImageCompare",
     "MKAnySwitch",
-    "MKFastGroupsMuter",
-    "MKFastGroupsBypasser",
+    "MKIgnoreGroups",
     "MKPromptConcat",
-    "MKPromptPreset",
     "MKPromptLibrary",
     "MKQwenImage21PromptEnhancer",
     "MKVRAMCleanup",
@@ -73,6 +72,7 @@ __all__ = [
     "MKImageCrop",
     "MKImageMergeMask",
     "MKMaskCrop",
+    "MKMaskIsEmpty",
     "MKCropRestore",
     "MKAdaptiveMegapixels",
     "MKBgRemove",
