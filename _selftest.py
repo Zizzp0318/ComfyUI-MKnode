@@ -1326,8 +1326,8 @@ from Comfyui_MKnode.nodes.ignore_groups import MKIgnoreGroups  # noqa: E402
 
 ig_it = MKIgnoreGroups.INPUT_TYPES()
 check("  已注册", "MK_IgnoreGroups" in pkg.NODE_CLASS_MAPPINGS)
-check("  显示名为 MK-禁用（忽略）多组",
-      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups") == "MK-禁用（忽略）多组",
+check("  显示名为 MK-禁用（忽略）多组老关怀版",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups") == "MK-禁用（忽略）多组老关怀版",
       pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups"))
 check("  无输入", ig_it["required"] == {}, str(ig_it["required"]))
 check("  无输出（纯 UI 节点）", MKIgnoreGroups.RETURN_TYPES == (), str(MKIgnoreGroups.RETURN_TYPES))
@@ -1336,12 +1336,13 @@ check("  执行返回空元组", MKIgnoreGroups().execute() == ())
 
 # 前端契约：面板逻辑全在 web/ignore_groups.js
 ig_js = _read("web/ignore_groups.js")
+core_js = _read("web/mk_ignore_groups_core.js")
 check("  前端扩展名带包前缀", 'name: "Comfyui_MKnode.IgnoreGroups"' in ig_js)
 check("  只接管 MK_IgnoreGroups", 'const NODE_TYPE = "MK_IgnoreGroups";' in ig_js)
 check("  用 addDOMWidget 挂面板（Nodes 2.0 才不空白）", "addDOMWidget(" in ig_js)
-check("  绕过用 mode=4、禁用用 mode=2", "n.mode = 4" in ig_js and "n.mode = 2" in ig_js)
+check("  绕过用 mode=4、禁用用 mode=2", "n.mode = 4" in core_js and "n.mode = 2" in core_js)
 check("  恢复用 mode=0 并清 flags.disabled",
-      "n.mode = 0" in ig_js and "n.flags.disabled = false" in ig_js)
+      "n.mode = 0" in core_js and "n.flags.disabled = false" in core_js)
 check("  三档切换模式齐全",
       all(k in ig_js for k in ('"default"', '"always_one"', '"at_most_one"')))
 check("  两种排序齐全", '"position"' in ig_js and '"alphabet"' in ig_js)
@@ -1352,9 +1353,9 @@ check("  嵌套分组联动", "getAllNestedGroups" in ig_js)
 check("  以「节点所在的图」为准（子图里也能用）",
       "return (node && node.graph) || app.graph;" in ig_js)
 check("  递归收集子图（isSubgraphNode / subgraph 引用）",
-      "isSubgraphNode" in ig_js and "n.subgraph" in ig_js and "descendantSubgraphs" in ig_js)
+      "isSubgraphNode" in core_js and "n.subgraph" in core_js and "descendantSubgraphs" in core_js)
 check("  子图分组键带前缀，避免与根图同名组冲突",
-      "sg:${gid}:${title}" in ig_js)
+      "sg:${gid}:${title}" in core_js)
 check("  可关闭「包含子图分组」", "mk_ig_include_subgraphs" in ig_js and "包含子图分组" in ig_js)
 check("  改子图内的组也能记变更（多图 change 钩子）",
       "markGraphsChanged" in ig_js and "_hookedGraphs" in ig_js)
@@ -1373,6 +1374,37 @@ ig_code_only = "\n".join(
 check("  代码不引用 goohaitools 的任何文件（注释提及来源不算）",
       "goohaitools" not in ig_code_only.lower())
 
+# 共用核心模块
+check("  共用核心模块存在", os.path.isfile(os.path.join(pkg_dir, "web", "mk_ignore_groups_core.js")))
+check("  核心模块导出分组扫描与开关",
+      all(k in core_js for k in ("export function buildEntries", "export function collectNodes",
+                                 "export function getGroupState", "export function bypassGroup",
+                                 "export function restoreGroup")), "缺少导出")
+check("  老关怀版改为引用核心模块",
+      "mk_ignore_groups_core.js" in ig_js and "buildEntries" in ig_js)
+
+# 青春版：原生 widget
+youth_js = _read("web/ignore_groups_youth.js")
+you_it = None
+check("  青春版已注册", "MK_IgnoreGroupsYouth" in pkg.NODE_CLASS_MAPPINGS)
+check("  青春版显示名正确",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroupsYouth") == "MK-禁用（忽略）多组青春版",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroupsYouth"))
+from Comfyui_MKnode.nodes.ignore_groups import MKIgnoreGroupsYouth  # noqa: E402
+
+you_it = MKIgnoreGroupsYouth.INPUT_TYPES()
+check("  青春版无输入输出", you_it["required"] == {} and MKIgnoreGroupsYouth.RETURN_TYPES == ())
+check("  青春版分类为 MK节点", MKIgnoreGroupsYouth.CATEGORY == "MK节点")
+check("  青春版扩展名带包前缀", 'name: "Comfyui_MKnode.IgnoreGroupsYouth"' in youth_js)
+check("  青春版只接管 MK_IgnoreGroupsYouth", 'const NODE_TYPE = "MK_IgnoreGroupsYouth";' in youth_js)
+check("  青春版用原生 toggle 显示每组", 'addWidget("toggle"' in youth_js)
+check("  青春版设置入口是原生按钮", 'addWidget("button", "设置"' in youth_js)
+check("  青春版不挂 DOM 面板", "addDOMWidget(" not in youth_js)
+check("  青春版 widget 不参与序列化", "serialize = false" in youth_js)
+check("  青春版取消 UI 缩放", "UI组件大小" not in youth_js and "ui_scale" not in youth_js)
+check("  青春版保留子图开关", "mk_ig_include_subgraphs" in youth_js)
+check("  青春版同样支持子图（共用核心）", "mk_ignore_groups_core.js" in youth_js and "buildEntries" in youth_js)
+
 ig_loc = loc_all.get("MK_IgnoreGroups")
 check("  语言包含 MK_IgnoreGroups", ig_loc is not None)
 if ig_loc:
@@ -1382,6 +1414,13 @@ if ig_loc:
     check("  语言包 display_name 与注册一致",
           ig_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_IgnoreGroups"],
           f"{ig_loc.get('display_name')!r}")
+
+you_loc = loc_all.get("MK_IgnoreGroupsYouth")
+check("  语言包含 MK_IgnoreGroupsYouth", you_loc is not None)
+if you_loc:
+    check("  青春版 language display_name 与注册一致",
+          you_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_IgnoreGroupsYouth"],
+          f"{you_loc.get('display_name')!r}")
 
 
 print("=== 22. 遮罩是否为空（MK_MaskIsEmpty，V3）===")

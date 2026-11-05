@@ -24,6 +24,15 @@
 // 根元素挂回去（否则样式与事件会跟着旧节点走，面板变死）。
 
 import { app } from "../../scripts/app.js";
+// 分组扫描 / 状态判定与「青春版」共用，见 mk_ignore_groups_core.js
+import {
+    buildEntries,
+    collectNodes,
+    getAllNestedGroups,
+    getGroupState,
+    bypassGroup,
+    restoreGroup,
+} from "./mk_ignore_groups_core.js";
 
 const NODE_TYPE = "MK_IgnoreGroups";
 
@@ -286,95 +295,11 @@ function buildIgnoreGroupsUI(node) {
     }
 
 
-    function gBounds(g) {
-        if (g._bounding) return [...g._bounding];
-        if (g.bounding) return [...g.bounding];
-        const p = g.pos || [0, 0], s = g.size || [0, 0];
-        return [p[0], p[1], s[0], s[1]];
-    }
-
-    function getGroupColor(g) {
-        if (g.color) {
-            let c = g.color;
-            if (typeof c === "number") {
-                return "#" + c.toString(16).padStart(6, "0");
-            }
-            if (typeof c === "string" && c.startsWith("#") && (c.length === 4 || c.length === 7)) {
-                if (c.length === 4) {
-                    return "#" + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
-                }
-                return c;
-            }
-        }
-        return "";
-    }
-
-    function nBounds(n) {
-        const p = n.pos || [0, 0];
-        const s = n.size || [100, 60];
-        if (n.collapsed || n._collapsed) {
-            const titleH = (typeof LiteGraph !== "undefined" && LiteGraph.NODE_TITLE_HEIGHT) || 30;
-            let collapsedW = n._collapsed_width;
-            if (!collapsedW || collapsedW <= 0) {
-                const title = (typeof n.getTitle === "function" ? n.getTitle() : n.title) || "";
-                collapsedW = Math.max(80, title.length * 7 + 50);
-            }
-            return [p[0], p[1], collapsedW, titleH];
-        }
-        return [p[0], p[1], s[0], s[1]];
-    }
-
-    function hit(a, b) {
-        return !(a[0] + a[2] <= b[0] || a[0] >= b[0] + b[2] ||
-                 a[1] + a[3] <= b[1] || a[1] >= b[1] + b[3]);
-    }
-
-    function inside(inner, outer) {
-        return inner[0] >= outer[0] && inner[1] >= outer[1] &&
-               inner[0] + inner[2] <= outer[0] + outer[2] &&
-               inner[1] + inner[3] <= outer[1] + outer[3];
-    }
-
-
     // ── 图上下文：本节点可能被拖进子图 ──
     // 子图的组挂在 Subgraph（也是一个 LGraph）的 _groups 上，不在根图上。
     // 旧实现一律读 app.graph，所以节点进了子图、或组画在子图里时都会「识别不到」。
     function hostGraph() {
         return (node && node.graph) || app.graph;
-    }
-
-    // 图的稳定标识：优先用 LGraph.id，没有就临时分配一个（同一实例始终同 id）
-    const _gidCache = new WeakMap();
-    let _gidSeq = 0;
-    function gidOf(g) {
-        if (!g) return "g0";
-        if (g.id != null) return String(g.id);
-        let id = _gidCache.get(g);
-        if (!id) {
-            id = "g" + (++_gidSeq);
-            _gidCache.set(g, id);
-        }
-        return id;
-    }
-
-    // 当前图里「真的被实例化」的子图（递归、去重）。
-    // 只走节点上的 subgraph 引用，所以工作流里没被用到的子图定义不会跑进面板。
-    function descendantSubgraphs(rootG) {
-        const out = [];
-        const seen = new Set();
-        function walk(g, level) {
-            if (!g || level > 8) return;
-            for (const n of (g._nodes || [])) {
-                if (typeof n.isSubgraphNode !== "function" || !n.isSubgraphNode()) continue;
-                const sg = n.subgraph;
-                if (!sg || seen.has(sg)) continue;
-                seen.add(sg);
-                out.push(sg);
-                walk(sg, level + 1);
-            }
-        }
-        walk(rootG, 0);
-        return out;
     }
 
     // ── 分组快照缓存：一次刷新周期里只扫一遍各图的 _groups ──
@@ -389,39 +314,7 @@ function buildIgnoreGroupsUI(node) {
     function rawEntries(invalidate) {
         if (invalidate) { _rgCache = null; }
         if (_rgCache) return _rgCache;
-
-        const host = hostGraph();
-        if (!host) { _rgCache = []; return _rgCache; }
-
-        const graphs = [host];
-        if (includeSubgraphs) {
-            for (const sg of descendantSubgraphs(host)) graphs.push(sg);
-        }
-
-        const out = [];
-        graphs.forEach((g, gi) => {
-            const groups = (g && g._groups) || [];
-            if (!groups.length) return;
-            const isHost = (g === host);
-            const gid = gidOf(g);
-            groups.forEach(gr => {
-                const title = (gr.title || "").trim() || "Unnamed";
-                out.push({
-                    title,
-                    // 面板只显示组名：不管组在本图还是子图里，都不加前缀
-                    label: title,
-                    key: isHost ? title : `sg:${gid}:${title}`,
-                    bounds: gBounds(gr),
-                    ref: gr,
-                    color: getGroupColor(gr),
-                    graph: g,
-                    gid,
-                    order: gi,
-                });
-            });
-        });
-
-        _rgCache = out;
+        _rgCache = buildEntries(hostGraph(), includeSubgraphs);
         return _rgCache;
     }
 
@@ -429,7 +322,7 @@ function buildIgnoreGroupsUI(node) {
     function visible(cachedAll) {
         let list = cachedAll || rawEntries();
         if (!cachedAll) list = list.slice(); // 防止修改缓存
-        list = list.filter(g => collectNodes(g, list, cachedAll).length > 0);
+        list = list.filter(g => collectNodes(g, list).length > 0);
         if (filter.trim()) {
             const kw = filter.trim().toLowerCase();
             list = list.filter(g => (g.label || g.title).toLowerCase().includes(kw));
@@ -455,78 +348,6 @@ function buildIgnoreGroupsUI(node) {
             );
         }
         return list;
-    }
-
-    // 组内节点 = 落在组矩形里的节点。只在本组所属的那张图里找，
-    // 嵌套子组的矩形也算（父组包含子组成员）。
-    function collectNodes(grp, allEntries, cachedAll) {
-        const g = grp.graph || hostGraph();
-        if (!g || !g._nodes) return [];
-        const all = allEntries || rawEntries();
-        const pb = grp.bounds;
-        const rects = [pb];
-        all.forEach(ag => {
-            if (ag.graph === g && ag.ref !== grp.ref && inside(ag.bounds, pb)) {
-                rects.push(ag.bounds);
-            }
-        });
-        return g._nodes.filter(n => {
-            const nb = nBounds(n);
-            return rects.some(r => hit(nb, r));
-        });
-    }
-
-    // 逐层找出所有嵌套子组（用于父组开关联动子组），同样限制在同一张图内
-    function getAllNestedGroups(parentGroup) {
-        const all = rawEntries();
-        const g = parentGroup.graph || hostGraph();
-        const result = [];
-        const visited = new Set();
-        visited.add(parentGroup.ref);
-        function findNested(parent) {
-            all.forEach(ag => {
-                if (ag.graph !== g) return;
-                if (!visited.has(ag.ref) && inside(ag.bounds, parent.bounds)) {
-                    visited.add(ag.ref);
-                    result.push(ag);
-                    findNested(ag);
-                }
-            });
-        }
-        findNested(parentGroup);
-        return result;
-    }
-
-
-    // 关闭一组：igDisable ? Mute(2) : Bypass(4)
-    function bypassGroup(grp, cachedAll) {
-        collectNodes(grp, null, cachedAll).forEach(n => {
-            if (igDisable) { n.mode = 2; } else { n.mode = 4; }
-        });
-    }
-
-    // 打开一组：恢复 mode 0，并清掉 flags.disabled（那是另一套禁用标记）
-    function restoreGroup(grp, cachedAll) {
-        collectNodes(grp, null, cachedAll).forEach(n => {
-            n.mode = 0;
-            if (n.flags) n.flags.disabled = false;
-        });
-    }
-
-    function isNodeActive(n) {
-        return n.mode !== 4 && n.mode !== 2 && !n.flags?.disabled;
-    }
-
-
-    // true = 全开，false = 全关，null = 半开（混合状态）
-    function getGroupState(grp, cachedAll) {
-        const nodes = collectNodes(grp, null, cachedAll);
-        if (nodes.length === 0) return true;
-        const allActive = nodes.every(n => isNodeActive(n));
-        const allInactive = nodes.every(n => !isNodeActive(n));
-        if (allActive) return true;
-        if (allInactive) return false;
-        return null;
     }
 
     function computeStateSig(list, cachedAll) {
@@ -876,7 +697,7 @@ function buildIgnoreGroupsUI(node) {
                         ? activeSet.includes(g.key)
                         : g.key === active;
                     if (isOn) restoreGroup(g, cachedAll);
-                    else bypassGroup(g, cachedAll);
+                    else bypassGroup(g, cachedAll, igDisable);
                     touched.add(g.graph || hostGraph());
                 });
                 // 改的可能是子图里的节点，对应的那张图也要记一笔变更
@@ -905,7 +726,7 @@ function buildIgnoreGroupsUI(node) {
                 if (!activeSet.includes(entryKey)) activeSet.push(entryKey);
                 // 打开父组时把嵌套子组一起打开，否则子组会保持关闭、面板看起来对不上
                 if (grp) {
-                    getAllNestedGroups(grp).forEach(ng => {
+                    getAllNestedGroups(grp, rawEntries()).forEach(ng => {
                         if (!activeSet.includes(ng.key)) activeSet.push(ng.key);
                     });
                 }
@@ -913,7 +734,7 @@ function buildIgnoreGroupsUI(node) {
                 const offSet = new Set();
                 offSet.add(entryKey);
                 if (grp) {
-                    getAllNestedGroups(grp).forEach(ng => offSet.add(ng.key));
+                    getAllNestedGroups(grp, rawEntries()).forEach(ng => offSet.add(ng.key));
                 }
                 activeSet = activeSet.filter(t => !offSet.has(t));
             }

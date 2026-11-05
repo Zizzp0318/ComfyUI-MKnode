@@ -11,7 +11,7 @@ from .bg_remove import MKBgRemove
 from .adaptive_megapixels import MKAdaptiveMegapixels
 from .any_switch import MKAnySwitch
 from .gallery import MKFacePicker, MKGarmentPicker, MKPosePicker
-from .ignore_groups import MKIgnoreGroups
+from .ignore_groups import MKIgnoreGroups, MKIgnoreGroupsYouth
 from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
 from .image_selector import MKImageSelector
@@ -35,6 +35,7 @@ NODE_CLASSES = [
     MKImageCompare,
     MKAnySwitch,
     MKIgnoreGroups,
+    MKIgnoreGroupsYouth,
     MKPromptConcat,
     MKPromptLibrary,
     MKQwenImage21PromptEnhancer,
@@ -64,6 +65,7 @@ __all__ = [
     "MKImageCompare",
     "MKAnySwitch",
     "MKIgnoreGroups",
+    "MKIgnoreGroupsYouth",
     "MKPromptConcat",
     "MKPromptLibrary",
     "MKQwenImage21PromptEnhancer",
