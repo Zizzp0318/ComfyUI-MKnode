@@ -20,6 +20,7 @@ MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 对比 / 保�
 | MK-自适应百万像素 | 按图像实际像素输出百万像素，并夹在你设定的最小/最大区间内 |
 | MK-自适应最长边 | 按图像长边输出分辨率（像素），并夹在你设定的最小/最大区间内 |
 | MK-提示词拼接 | 把多段提示词按分隔符拼成一条，输入端可动态增减 |
+| MK-Minimax H3多参考生视频 | 官方 MiniMax H3 参考生视频的完整复制版，参考图 / 视频 / 音频插槽全部常驻（不用点「+」加槽） |
 | MK-提示词大全 | 图片化提示词库：多级分类 + 缩略图网格，点图即把提示词填入文本框 |
 | MK-任意切换 | 多路任意类型输入，输出第一个非空值；输入端自动增减、类型自动跟随 |
 | MK-Qwen Image 2.1提示词增强 | 用 Qwen 官方 PE 模型把简短描述改写成完整提示词，支持文生图 / 图生图（最多 9 张参考图） |
@@ -515,7 +516,29 @@ MK-图像分块 ──分块（列表）──> 采样/重绘节点 ──> MK-�
 > 迁移自 ComfyUI-AusBoss 的 Tiled Upscale / Tiled Upscale Stitch，已改写为 V3 API（NODE 2.0）：
 > `io.ComfyNode` + `define_schema`，分块信息类型改为 `MK_TILE_STITCHER`。
 
+### MK-Minimax H3多参考生视频
+
+官方 `comfy_extras/nodes_minimax_h3.py` 里 `MiniMaxH3ReferenceToVideo` 的完整复制，只改了一处：
+官方的参考素材输入是 `io.Autogrow`，前端平时只给一个「+」，点一次才长出一个槽位，没点出来的槽位是隐藏的；
+本节点改成固定常驻插槽。
+
+| 输入 | 默认 | 说明 |
+| --- | --- | --- |
+| clip / vae / audio_vae | — | 与官方一致；不接 vae 时参考素材只影响文本编码器 |
+| prompt | — | 提示词，用 `<Picture i>` / `<Video k>` / `<Audio j>` 指代参考素材 |
+| width / height / length | 1344 / 768 / 124 | 与官方一致（24 fps，长度对齐到 17k+5 帧） |
+| ref_image_size | match | `match` 按本次生成像素面积等比缩图；`max` 用 2048 短边换身份保真，但更慢 |
+| 参考图 1~9 | 空 | 对应 `<Picture 1>`~`<Picture 9>`，超过 2048 短边会缩小、不会放大 |
+| 参考视频 1~3 | 空 | 24 fps 的帧序列，2~15 秒，对应 `<Video 1>`~`<Video 3>` |
+| 参考视频音频 1~3 | 空 | 与同号参考视频配对的原声，有它时 `<Audio j>` 排在对应 `<Video k>` 之前 |
+| 参考音频 1~3 | 空 | 独立参考音频 |
+
+输出：`positive`（CONDITIONING）与音视频 `LATENT`，与官方完全一致。
+想改常驻槽位数量，改 `nodes/minimax_h3_ref2video.py` 顶部的 `REF_IMAGE_SLOTS` / `REF_VIDEO_SLOTS` /
+`REF_VIDEO_AUDIO_SLOTS` / `REF_AUDIO_SLOTS`（官方上限 9 / 3 / 3 / 3）。
+
 ## 说明
+
 
 - 图像加载直接复用官方 `LoadImage` 的加载逻辑，保证 pyav / Pillow 两条路径（含动画 WebP 回退、EXIF 旋转、alpha 转遮罩）与上游一致。
 - 图像选择器迁移自 [Comfyui_LG_Tools](https://github.com/LAOGOU-666/Comfyui_LG_Tools) 的 ImageSelector，交互逻辑保持一致，并删除了 `keep_last_selection` 模式；已改用 V3 API（`io.ComfyNode`），前端由 canvas 绘制改为 DOM 组件，因此在旧版 LiteGraph 与 Nodes 2.0（Vue 渲染）下都能正常选图。
