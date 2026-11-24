@@ -1420,17 +1420,22 @@ check("  解包节点输入是一条总线", list(_h3u.INPUT_TYPES()["required"]
 check("  解包节点输入类型为总线类型",
       _h3u.INPUT_TYPES()["required"]["bus"][0] == _h3_bus,
       str(_h3u.INPUT_TYPES()["required"]["bus"][0]))
-check("  解包节点输出 18 个（12 IMAGE + 6 AUDIO）",
-      len(_h3u.RETURN_TYPES) == 18 and _h3u.RETURN_TYPES.count("IMAGE") == 12
-      and _h3u.RETURN_TYPES.count("AUDIO") == 6, str(_h3u.RETURN_TYPES))
+check("  解包节点输出 21 个（12 IMAGE + 6 AUDIO + 3 FLOAT）",
+      len(_h3u.RETURN_TYPES) == 21 and _h3u.RETURN_TYPES.count("IMAGE") == 12
+      and _h3u.RETURN_TYPES.count("AUDIO") == 6 and _h3u.RETURN_TYPES.count("FLOAT") == 3,
+      str(_h3u.RETURN_TYPES))
+check("  末尾 3 个口名为 视频1FPS / 视频2FPS / 视频3FPS",
+      list(_h3u.RETURN_NAMES[-3:]) == ["视频1FPS", "视频2FPS", "视频3FPS"],
+      str(_h3u.RETURN_NAMES[-3:]))
 
 # 解包口名必须与「MK-Minimax H3多参考生视频」的输入口逐字一致，否则接不上
 _h3v_schema = pkg.NODE_CLASS_MAPPINGS["MK_MinimaxH3ReferenceToVideo"].GET_SCHEMA()
 _h3v_inputs = [i.id for i in _h3v_schema.inputs
                if i.id.startswith("ref_") and i.id != "ref_image_size"]
-check("  解包输出口名与参考生视频的输入口逐字一致", list(_h3u.RETURN_NAMES) == _h3v_inputs,
-      str([x for x in _h3u.RETURN_NAMES if x not in _h3v_inputs]))
-check("  解包口顺序：图1-9 → 视频1-3 → 视频音频1-3 → 音频1-3",
+check("  解包输出口名与参考生视频的输入口逐字一致（前 18 个）",
+      list(_h3u.RETURN_NAMES[:18]) == _h3v_inputs,
+      str([x for x in _h3u.RETURN_NAMES[:18] if x not in _h3v_inputs]))
+check("  解包口顺序：图1-9 → 视频1-3 → 视频音频1-3 → 音频1-3 → 3 个帧率口",
       list(_h3u.RETURN_NAMES[:3]) == ["ref_image_1", "ref_image_2", "ref_image_3"]
       and _h3u.RETURN_NAMES[9] == "ref_video_1"
       and _h3u.RETURN_NAMES[12] == "ref_video_audio_1"
@@ -1439,27 +1444,55 @@ check("  解包口顺序：图1-9 → 视频1-3 → 视频音频1-3 → 音频1-
 _h3m_node = _h3m()
 _h3m_empty = _h3m_node.load("")
 _h3m_bus_val = _h3m_empty.get("result", (None,))[0] if _h3m_empty.get("result") else None
+_h3_keys = getattr(_h3m_mod, "OUTPUT_KEYS", ())
+_h3_fps_keys = getattr(_h3m_mod, "FPS_KEYS", ())
 check("  空配置 -> result 是一条总线", isinstance(_h3m_bus_val, dict), str(type(_h3m_bus_val)))
-check("  总线 18 个键且全为 None",
-      isinstance(_h3m_bus_val, dict) and len(_h3m_bus_val) == 18
-      and all(v is None for v in _h3m_bus_val.values()),
+check("  帧率口常量：3 个 key + 3 个显示名",
+      len(_h3_fps_keys) == 3
+      and list(_h3_fps_keys) == ["video_fps_1", "video_fps_2", "video_fps_3"]
+      and list(getattr(_h3m_mod, "FPS_NAMES", ())) == ["视频1FPS", "视频2FPS", "视频3FPS"],
+      str(_h3_fps_keys))
+check("  总线 21 个键（18 素材 + 3 帧率）",
+      isinstance(_h3m_bus_val, dict) and len(_h3m_bus_val) == 21 and len(_h3_keys) == 21,
       str(None if not isinstance(_h3m_bus_val, dict) else len(_h3m_bus_val)))
-check("  总线键名与解包口一致", isinstance(_h3m_bus_val, dict)
-      and set(_h3m_bus_val) == set(_h3u.RETURN_NAMES),
+check("  总线：素材键全为 None、帧率键全为 0.0（FLOAT 不给 None）",
+      isinstance(_h3m_bus_val, dict)
+      and all(_h3m_bus_val.get(k) is None for k in _h3u.RETURN_NAMES[:18])
+      and all(_h3m_bus_val.get(k) == 0.0 for k in _h3_fps_keys),
       str(None if not isinstance(_h3m_bus_val, dict)
-          else set(_h3m_bus_val) ^ set(_h3u.RETURN_NAMES)))
+          else {k: _h3m_bus_val.get(k) for k in _h3_fps_keys}))
+check("  总线键顺序与解包口一致", isinstance(_h3m_bus_val, dict)
+      and tuple(_h3m_bus_val) == tuple(_h3_keys),
+      str(None if not isinstance(_h3m_bus_val, dict)
+          else list(tuple(_h3m_bus_val))[:2]))
 
 _h3u_node = _h3u()
 _h3u_out = _h3u_node.unpack(_h3m_bus_val)
-check("  解包 -> 18 元组", isinstance(_h3u_out, tuple) and len(_h3u_out) == 18, str(type(_h3u_out)))
-check("  解包全 None（空总线）", all(v is None for v in _h3u_out))
+check("  解包 -> 21 元组", isinstance(_h3u_out, tuple) and len(_h3u_out) == 21, str(type(_h3u_out)))
+check("  解包空总线：素材全 None、帧率全 0.0",
+      all(v is None for v in _h3u_out[:18]) and all(v == 0.0 for v in _h3u_out[18:]))
 # 打包 -> 解包 往返：顺序不能错位
-_h3_fake = {k: f"V{i:02d}" for i, k in enumerate(_h3u.RETURN_NAMES)}
+_h3_fake = {k: (float(i) if k in _h3_fps_keys else f"V{i:02d}")
+            for i, k in enumerate(_h3_keys)}
+_h3_fake_out = _h3u_node.unpack(_h3_fake)
 check("  打包 → 解包 顺序不错位",
-      _h3u_node.unpack(_h3_fake) == tuple(f"V{i:02d}" for i in range(18)),
-      str(_h3u_node.unpack(_h3_fake)[:3]))
-check("  解包 None 不崩（全 None）", all(v is None for v in _h3u_node.unpack(None)))
-check("  解包脏数据不崩（字符串）", len(_h3u_node.unpack("not-a-dict")) == 18)
+      _h3_fake_out == tuple(f"V{i:02d}" for i in range(18))
+      + tuple(float(i) for i in range(18, 21)),
+      str(_h3_fake_out[:3]))
+check("  帧率脏值钳成 0（None / 负数 / 乱码都不喂给下游）",
+      _h3u_node.unpack({k: v for k, v in
+                        zip(_h3_keys, [None] * 18 + [None, -3, "abc"])})[18:]
+      == (0.0, 0.0, 0.0),
+      str(_h3u_node.unpack({k: v for k, v in
+                            zip(_h3_keys, [None] * 18 + [None, -3, "abc"])})[18:]))
+check("  解包 None 不崩（全 None）", all(v is None for v in _h3u_node.unpack(None)[:18]))
+check("  解包脏数据不崩（字符串）", len(_h3u_node.unpack("not-a-dict")) == 21)
+check("  生效帧率：填了强制帧率就直接用它（不开文件）",
+      _h3m_mod.video_effective_rate("不存在.mp4", 12.0) == 12.0,
+      str(_h3m_mod.video_effective_rate("不存在.mp4", 12.0)))
+check("  生效帧率：文件读不到时回落 24",
+      _h3m_mod.video_effective_rate("一定不存在.mp4") == 24.0,
+      str(_h3m_mod.video_effective_rate("一定不存在.mp4")))
 
 _h3m_dirty = _h3m_node.load('{"images": "not-a-list", "videos": [null, 1, "x"]}')
 check("  脏配置不崩 -> 仍是总线", isinstance(_h3m_dirty.get("result", (None,))[0], dict))
@@ -1589,8 +1622,15 @@ if _h3u_loc:
     check("  解包节点 display_name 一致",
           _h3u_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_MinimaxH3MediaUnpack"],
           f"{_h3u_loc.get('display_name')!r}")
-    check("  解包节点语言包输出 18 条", len(_h3u_loc.get("outputs", {})) == 18,
+    check("  解包节点语言包输出 21 条（18 素材 + 3 帧率）",
+          len(_h3u_loc.get("outputs", {})) == 21,
           str(len(_h3u_loc.get("outputs", {}))))
+    _h3u_loc_out = _h3u_loc.get("outputs", {})
+    check("  语言包 18/19/20 是 视频1FPS / 视频2FPS / 视频3FPS",
+          [_h3u_loc_out.get("18", {}).get("name"),
+           _h3u_loc_out.get("19", {}).get("name"),
+           _h3u_loc_out.get("20", {}).get("name")] == ["视频1FPS", "视频2FPS", "视频3FPS"],
+          str(sorted(_h3u_loc_out)))
     check("  解包节点语言包输入为 bus", set(_h3u_loc.get("inputs", {})) == {"bus"},
           str(sorted(_h3u_loc.get("inputs", {}))))
 
@@ -1663,6 +1703,101 @@ for _w, _h, _mp, _st in [(512, 384, 1.0, 32), (640, 480, 2.0, 16)]:
     check(f"  {_w}x{_h} 合并输出值域在 [0,1]",
           bool((_img >= -1e-5).all() and (_img <= 1 + 1e-5).all()),
           f"min={float(_img.min()):.4f} max={float(_img.max()):.4f}")
+
+print("=== 24. 批量图像（MK_BatchImages，V3，容忍空输入）===")
+_b = pkg.NODE_CLASS_MAPPINGS.get("MK_BatchImages")
+check("  已注册", _b is not None)
+check("  显示名 MK-批量图像",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_BatchImages") == "MK-批量图像",
+      str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_BatchImages")))
+_b_schema = _b.GET_SCHEMA()
+_b_ids = [i.id for i in _b_schema.inputs]
+check("  9 个常驻插槽 image_1..image_9",
+      _b_ids == [f"image_{i}" for i in range(1, 10)], str(_b_ids))
+check("  9 个插槽全部 optional（可留空 / 可不连线）",
+      all(getattr(i, "optional", False) for i in _b_schema.inputs),
+      str([(i.id, getattr(i, "optional", None)) for i in _b_schema.inputs]))
+check("  输出 1 条 IMAGE", len(_b_schema.outputs) == 1, str(_b_schema.outputs))
+check("  分类 MK节点", _b_schema.category == "MK节点", _b_schema.category)
+
+_bmod = sys.modules.get("Comfyui_MKnode.nodes.batch_images")
+check("  模块随包加载", _bmod is not None)
+
+
+def _bimg(h, w, c=3, batch=1, fill=0.0):
+    return torch.full((batch, h, w, c), fill)
+
+
+# 全空：必须是清晰的 ValueError，而不是让下游炸在 .shape 上
+_b_type, _b_msg = None, ""
+try:
+    _b.execute()
+except Exception as _exc:  # noqa: BLE001
+    _b_type, _b_msg = type(_exc).__name__, str(_exc)
+check("  全空时抛 ValueError", _b_type == "ValueError", str(_b_type))
+check("  全空文案指明节点与原因（不含 NoneType）",
+      "MK-批量图像" in _b_msg and "NoneType" not in _b_msg, _b_msg)
+
+# 只给一路（模拟「只装了图片1」，其余 8 个槽位是 None）
+_b1 = _b.execute(**{"image_1": _bimg(64, 48),
+                    **{f"image_{i}": None for i in range(2, 10)}})
+check("  1 路有值 + 8 路 None -> B=1，尺寸不变",
+      tuple(_b1.result[0].shape) == (1, 64, 48, 3), str(tuple(_b1.result[0].shape)))
+
+# 多路同尺寸
+_b2 = _b.execute(**{"image_1": _bimg(64, 48, fill=0.1),
+                    "image_3": _bimg(64, 48, fill=0.2)}).result[0]
+check("  两路同尺寸 -> B=2、尺寸不变", tuple(_b2.shape) == (2, 64, 48, 3),
+      str(tuple(_b2.shape)))
+check("  顺序按插槽号（第 1 张来自 image_1，第 2 张来自 image_3）",
+      abs(float(_b2[0].mean()) - 0.1) < 1e-6 and abs(float(_b2[1].mean()) - 0.2) < 1e-6,
+      str((float(_b2[0].mean()), float(_b2[1].mean()))))
+
+# 尺寸不同 -> 对齐到第一张
+_b3 = _b.execute(**{"image_1": _bimg(64, 48), "image_4": _bimg(32, 32)}).result[0]
+check("  尺寸不同的图对齐到第一张（64x48）", tuple(_b3.shape) == (2, 64, 48, 3),
+      str(tuple(_b3.shape)))
+
+# 通道不同 -> 补齐到最大值
+_b4 = _b.execute(**{"image_1": _bimg(16, 16, c=3), "image_2": _bimg(16, 16, c=4)}).result[0]
+check("  通道补齐到最大值 4", tuple(_b4.shape) == (2, 16, 16, 4), str(tuple(_b4.shape)))
+
+# 输入本身是 batch -> 原样保留
+_b5 = _b.execute(**{"image_1": _bimg(16, 16, batch=3)}).result[0]
+check("  输入自身是 3 帧 batch -> 原样保留", tuple(_b5.shape) == (3, 16, 16, 3),
+      str(tuple(_b5.shape)))
+
+# 中间的槽位空着不影响排序
+_b6 = _b.execute(**{"image_2": _bimg(8, 8, fill=0.25),
+                    "image_9": _bimg(8, 8, fill=0.75)}).result[0]
+check("  空槽位不参与排序（image_2 在 image_9 之前）",
+      tuple(_b6.shape) == (2, 8, 8, 3) and float(_b6[0].mean()) < float(_b6[1].mean()),
+      str(tuple(_b6.shape)))
+
+# 函数层兜底
+check("  batch_images([]) 返回 None（不崩）", _bmod.batch_images([]) is None)
+check("  batch_images 也过滤 None",
+      tuple(_bmod.batch_images([_bimg(8, 8), None]).shape) == (1, 8, 8, 3))
+
+# 与官方 BatchImagesNode 的 batch_images 实跑对照，确认批处理算法没跑偏
+from comfy_extras.nodes_post_processing import batch_images as _official_batch  # noqa: E402
+_same = [_bimg(20, 10, fill=0.3), _bimg(20, 10, c=4, fill=0.6)]
+check("  与官方一致：同尺寸 + 通道补齐，逐值相等",
+      torch.allclose(_bmod.batch_images(_same), _official_batch(_same)))
+_diff = [_bimg(20, 10), _bimg(8, 30)]
+check("  与官方一致：尺寸不同时对齐到第一张",
+      tuple(_bmod.batch_images(_diff).shape) == tuple(_official_batch(_diff).shape),
+      str((tuple(_bmod.batch_images(_diff).shape), tuple(_official_batch(_diff).shape))))
+
+_b_loc = loc_all.get("MK_BatchImages")
+check("  语言包含 MK-批量图像", _b_loc is not None)
+if _b_loc:
+    check("  语言包 display_name 一致",
+          _b_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_BatchImages"],
+          str(_b_loc.get("display_name")))
+    check("  语言包 9 个输入 + 1 个输出",
+          len(_b_loc.get("inputs", {})) == 9 and len(_b_loc.get("outputs", {})) == 1,
+          str((len(_b_loc.get("inputs", {})), len(_b_loc.get("outputs", {})))))
 
 print()
 if fails:

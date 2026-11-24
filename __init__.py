@@ -13,6 +13,7 @@ ComfyUI 的加载器对两者是 if/elif 二选一，而包内同时存在：
 from .nodes import (
     MKAdaptiveLongestEdge,
     MKAdaptiveMegapixels,
+    MKBatchImages,
     MKBgRemove,
     MKAnySwitch,
     MKIgnoreGroups,
@@ -52,6 +53,7 @@ NODE_CLASS_MAPPINGS = {
     "MK_ImageSelector": MKImageSelector,
     "MK_ImageCompare": MKImageCompare,
     "MK_AnySwitch": MKAnySwitch,
+    "MK_BatchImages": MKBatchImages,
     "MK_IgnoreGroups": MKIgnoreGroups,
     "MK_IgnoreGroupsYouth": MKIgnoreGroupsYouth,
     "MK_PromptConcat": MKPromptConcat,
@@ -83,6 +85,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_ImageSelector": "MK-图像选择器",
     "MK_ImageCompare": "MK-图像对比",
     "MK_AnySwitch": "MK-任意切换",
+    "MK_BatchImages": "MK-批量图像",
     "MK_IgnoreGroups": "MK-禁用（忽略）多组老年关怀版",
     "MK_IgnoreGroupsYouth": "MK-禁用（忽略）多组青春版",
     "MK_PromptConcat": "MK-提示词拼接",

@@ -7,8 +7,8 @@ import { app } from "../../scripts/app.js";
 //     中：3 个音频（预览窗 宽:高 = 2:1，带播放进度条 + 音频裁剪）
 //     下：3 个视频（正方形预览 + 视频设置）
 //   所有配置都存进 media_settings（JSON 字符串 widget）→ 随工作流保存，
-//   后端 nodes/minimax_h3_media_loader.py 解析后给出 18 个常驻素材输出口，
-//   口名与本包「MK-Minimax H3多参考生视频」的输入口逐字一致，一根线一个口直连。
+//   后端 nodes/minimax_h3_media_loader.py 解析后打包成一条素材总线，
+//   由「MK-多媒体素材解包」拆成 18 个素材口 + 3 个视频帧率口（视频1FPS~视频3FPS）。
 //
 //   迁移自 ComfyUI-JZL-MiniMax-H3 的 js/h3_media_loader.js，改动只有四处：
 //   - 节点 id / 扩展名 / DOM widget 名 / DOM 属性与 CSS 类前缀换成 MK 的

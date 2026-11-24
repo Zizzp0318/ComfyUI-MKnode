@@ -6,11 +6,13 @@
 
 两个节点配对使用，中间只走一根线：
 
-    MK-多媒体素材加载 ──素材总线（MK_REF2VA_BUS）──> MK-多媒体素材解包 ──18 个素材口──> 参考生视频
+    MK-多媒体素材加载 ──素材总线（MK_REF2VA_BUS）──> MK-多媒体素材解包 ──18 素材口 + 3 帧率口──> 参考生视频
 
 - 加载：19 个槽位读盘后打包成一条总线（``{ref_image_1: tensor, ...}``），画布上只有一根线；
 - 解包：把总线拆回 18 个常驻素材口，口名与本包「MK-Minimax H3多参考生视频」的输入口逐字一致
-  （``ref_image_1..9`` / ``ref_video_1..3`` / ``ref_video_audio_1..3`` / ``ref_audio_1..3``），一根线一个口直连。
+  （``ref_image_1..9`` / ``ref_video_1..3`` / ``ref_video_audio_1..3`` / ``ref_audio_1..3``），一根线一个口直连；
+  末尾另有 3 个 FLOAT 口「视频1FPS / 视频2FPS / 视频3FPS」，给的是每段参考视频的生效帧率
+  （填了强制帧率就是强制帧率，没填就是源文件帧率），未装载的槽位为 0.0。
 
 总线用的是自定义类型 ``MK_REF2VA_BUS``：只能本包这两个节点之间互连，接到别的类型会直接连不上，
 不会出现「插错了跑一半才发现」的情况。
@@ -54,14 +56,25 @@ VIDEO_COUNT = 3
 # 抽帧硬上限：防止误填（如 cap=0 且视频极长）时一次性吃光内存
 MAX_VIDEO_FRAMES_HARD = 6000
 
-# 输出口顺序 = 本包「MK-Minimax H3多参考生视频」的输入顺序（1 起算）
-OUTPUT_KEYS = tuple(
+# 18 个素材口：口名 = 总线键名 = 本包「MK-Minimax H3多参考生视频」的输入口名（1 起算）
+MEDIA_KEYS = tuple(
     [f"ref_image_{i}" for i in range(1, IMAGE_COUNT + 1)]
     + [f"ref_video_{i}" for i in range(1, VIDEO_COUNT + 1)]
     + [f"ref_video_audio_{i}" for i in range(1, VIDEO_COUNT + 1)]
     + [f"ref_audio_{i}" for i in range(1, AUDIO_COUNT + 1)]
 )
-OUTPUT_TYPES = tuple("AUDIO" if "audio" in key else "IMAGE" for key in OUTPUT_KEYS)
+MEDIA_TYPES = tuple("AUDIO" if "audio" in key else "IMAGE" for key in MEDIA_KEYS)
+
+# 追加在最后面的 3 个「视频N FPS」口：每段参考视频实际输出的帧率（FLOAT，未装载为 0.0）
+# 值 = 生效帧率：面板填了强制帧率就用它，没填读源文件帧率（都读不到才回落 24）。
+# 跳帧 / 帧数上限不改变帧率，所以这就是这段素材真正送下游的 fps。
+FPS_KEYS = tuple(f"video_fps_{i}" for i in range(1, VIDEO_COUNT + 1))
+FPS_NAMES = tuple(f"视频{i}FPS" for i in range(1, VIDEO_COUNT + 1))
+
+# 总线键（打包跑的是这批）；解包口名把 FPS 那三个换成中文显示名
+OUTPUT_KEYS = MEDIA_KEYS + FPS_KEYS
+OUTPUT_NAMES = MEDIA_KEYS + FPS_NAMES
+OUTPUT_TYPES = MEDIA_TYPES + ("FLOAT",) * len(FPS_KEYS)
 
 # 自定义总线类型：加载端打包、解包端拆开，只能这两头互连（与上游 JZL_REF2VA_BUS 区分）
 BUS_TYPE = "MK_REF2VA_BUS"
@@ -575,11 +588,11 @@ def video_effective_rate(path, force_rate=0.0):
 # ── 节点 ──────────────────────────────────────────────────────────
 
 class MKMinimaxH3MediaLoader:
-    """9 图 + 3 视频（含原声）+ 3 音频 → 18 个常驻输出口，直连参考生视频节点。
+    """9 图 + 3 视频（含原声）+ 3 音频 → 打包成一条素材总线，交给解包节点。
 
     media_settings 由前端 DOM 面板读写（每槽位的素材路径 / 开关 / 视频与音频参数），
-    随工作流保存。执行时按槽位顺序装载素材，输出口名与本包
-    「MK-Minimax H3多参考生视频」的输入口逐字一致，可直接一根对一根连线。
+    随工作流保存。执行时按槽位顺序装载素材，总线里既有 18 个素材（键名即解包口名），
+    也有 3 段参考视频的生效帧率（``video_fps_1..3``）。
     """
 
     @classmethod
@@ -623,7 +636,8 @@ class MKMinimaxH3MediaLoader:
 
     def load(self, media_settings=""):
         cfg = parse_settings(media_settings)
-        bus = {key: None for key in OUTPUT_KEYS}
+        bus = {key: None for key in MEDIA_KEYS}
+        bus.update({key: 0.0 for key in FPS_KEYS})   # 帧率口是 FLOAT，未装载给 0.0（不给 None）
         report = {"image": [0, 0], "audio": [0, 0], "video": [0, 0]}  # [载入数, 启用数]
         errors = []
 
@@ -658,17 +672,20 @@ class MKMinimaxH3MediaLoader:
                 if enabled and item["path"]:
                     errors.append("视频%d：文件不存在（%s）" % (i + 1, item["path"]))
                 continue
+            # 生效帧率：填了强制帧率用它，否则源文件帧率（读不到才回落 24）。
+            # 跳帧 / 帧数上限都不改变帧率，所以这个数就是画面实际输出的 fps。
+            rate = video_effective_rate(path, item["force_rate"])
             try:
                 bus[vkey] = load_video_frames(
                     path, force_rate=item["force_rate"], skip=item["skip"],
                     width=item["width"], height=item["height"], cap=item["cap"])
                 report["video"][0] += 1
+                bus["video_fps_%d" % (i + 1)] = float(rate)
             except Exception as exc:
                 errors.append("视频%d：%s" % (i + 1, exc))
             # 音轨跟着画面裁：跳过帧数 / 帧数上限 换算成秒，视频裁到哪音轨裁到哪
             # （否则画面只取 5 帧、声音却是整段，下游会以为「帧数上限没生效」）
             try:
-                rate = video_effective_rate(path, item["force_rate"])
                 a_start = (item["skip"] / rate) if rate > 0 else 0.0
                 a_dur = (item["cap"] / rate) if (item["cap"] > 0 and rate > 0) else 0.0
                 bus["ref_video_audio_%d" % (i + 1)] = load_video_audio(
@@ -710,10 +727,12 @@ class MKMinimaxH3MediaLoader:
 # ── 解包节点 ──────────────────────────────────────────────────────
 
 class MKMinimaxH3MediaUnpack:
-    """把「MK-多媒体素材加载」打的总线拆回 18 个素材口。
+    """把「MK-多媒体素材加载」打的总线拆回 18 个素材口 + 3 个视频帧率口。
 
-    输出口名与本包「MK-Minimax H3多参考生视频」的输入口逐字一致，一根线一个口直连。
-    总线里为 None 的槽位（未启用 / 未上传 / 文件丢失）解出来同样是 None，等于该口没连线。
+    前 18 个口名与本包「MK-Minimax H3多参考生视频」的输入口逐字一致，一根线一个口直连；
+    末尾 3 个 FLOAT 口「视频1FPS / 视频2FPS / 视频3FPS」给的是每段参考视频的生效帧率。
+    总线里为 None 的槽位（未启用 / 未上传 / 文件丢失）解出来同样是 None，等于该口没连线；
+    帧率口没有 None 这种说法，未装载时给 0.0。
     """
 
     @classmethod
@@ -728,7 +747,7 @@ class MKMinimaxH3MediaUnpack:
         }
 
     RETURN_TYPES = OUTPUT_TYPES
-    RETURN_NAMES = OUTPUT_KEYS
+    RETURN_NAMES = OUTPUT_NAMES
     FUNCTION = "unpack"
     CATEGORY = "MK节点"
     OUTPUT_NODE = False
@@ -736,4 +755,12 @@ class MKMinimaxH3MediaUnpack:
     def unpack(self, bus):
         if not isinstance(bus, dict):
             bus = {}
-        return tuple(bus.get(key) for key in OUTPUT_KEYS)
+        out = []
+        for key in OUTPUT_KEYS:
+            value = bus.get(key)
+            if key in FPS_KEYS:
+                # FLOAT 口不能是 None（下游一接就崩），脏值也钳成非负
+                out.append(_as_float(value, 0.0, 0.0))
+            else:
+                out.append(value)
+        return tuple(out)

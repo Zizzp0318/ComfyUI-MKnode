@@ -7,6 +7,7 @@
 """
 
 from .adaptive_longest_edge import MKAdaptiveLongestEdge
+from .batch_images import MKBatchImages
 from .bg_remove import MKBgRemove
 from .adaptive_megapixels import MKAdaptiveMegapixels
 from .any_switch import MKAnySwitch
@@ -34,6 +35,7 @@ NODE_CLASSES = [
     MKImageSelector,
     MKImageCompare,
     MKAnySwitch,
+    MKBatchImages,
     MKIgnoreGroups,
     MKIgnoreGroupsYouth,
     MKPromptConcat,
@@ -65,6 +67,7 @@ __all__ = [
     "MKImageSelector",
     "MKImageCompare",
     "MKAnySwitch",
+    "MKBatchImages",
     "MKIgnoreGroups",
     "MKIgnoreGroupsYouth",
     "MKPromptConcat",
