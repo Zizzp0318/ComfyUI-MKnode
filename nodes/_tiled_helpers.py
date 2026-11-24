@@ -37,24 +37,43 @@ MIN_VISIBLE_GROWTH = 1.6
 SHRINK_BELOW = 0.97
 MAX_TILES = 144
 
+# 1 MP = 1024 × 1024 像素：与官方「缩放图像（像素）」（ImageScaleToTotalPixels）同一口径，
+# 这样「成品百万像素 / 单块百万像素」这两个参数与官方缩放节点填的是同一个意思
+_PIXELS_PER_MP = 1024 * 1024
+
 
 def _round_half_up(value: float) -> int:
-    """四舍五入。Python 的 round 是银行家舍入，.5 会向偶数靠，这里不用它。"""
+    """四舍五入（.5 向上）。用于分块坐标的均匀分布，不用于对齐到倍数。"""
     return int(math.floor(value + 0.5))
 
 
 def snap_to_multiple(value: float, multiple: int) -> int:
-    """对齐到最近的倍数，且至少一步（与官方 Image Resize 的 Multiple 规则一致）。"""
+    """对齐到最近的倍数，且至少一步（与官方 Image Resize 的 Multiple 规则一致）。
+
+    官方用的是 ``round(value / steps) * steps``（Python 的银行家舍入），
+    这里保持一致 —— 换成「.5 向上」会在 32 / 8 这类步数的 x.5 边界差一个步长。
+    """
     step = max(1, int(multiple))
-    return max(step, _round_half_up(value / step) * step)
+    return max(step, int(round(value / step)) * step)
 
 
 def megapixel_size(width: int, height: int, megapixels: float, multiple: int) -> tuple[int, int]:
-    """按百万像素求目标尺寸，结果与官方 Image Resize 的 megapixels 模式一致。"""
-    scale = math.sqrt(float(megapixels) * 1e6 / (int(width) * int(height)))
+    """按百万像素求目标尺寸，与官方 ``ImageScaleToTotalPixels`` 逐行一致。
+
+        total    = megapixels * 1024 * 1024
+        scale_by = sqrt(total / (w * h))
+        width    = round(w * scale_by / steps) * steps
+        height   = round(h * scale_by / steps) * steps
+
+    注意不能写成「先 round 到像素、再对齐到倍数」：多一次中间取整会在 x.5 边界差一个步长。
+    """
+    if width <= 0 or height <= 0 or megapixels <= 0:
+        return max(1, int(width)), max(1, int(height))
+    step = max(1, int(multiple))
+    scale = math.sqrt(float(megapixels) * _PIXELS_PER_MP / (int(width) * int(height)))
     return (
-        snap_to_multiple(max(1, _round_half_up(width * scale)), multiple),
-        snap_to_multiple(max(1, _round_half_up(height * scale)), multiple),
+        max(step, int(round(width * scale / step)) * step),
+        max(step, int(round(height * scale / step)) * step),
     )
 
 
@@ -124,7 +143,7 @@ def plan_tiles(
     if tile_mp <= 0:
         raise ValueError("分块百万像素必须大于 0。")
     growth = max(1.0, float(max_growth))
-    source_mp = width * height / 1e6
+    source_mp = width * height / _PIXELS_PER_MP
     keep_size = float(megapixels) <= 0
     asked_mp = source_mp if keep_size else float(megapixels)
 
@@ -144,7 +163,7 @@ def plan_tiles(
         redraw_width, redraw_height = result_width, result_height
 
     columns, rows, tile_width, tile_height = _grid(
-        redraw_width, redraw_height, tile_mp * TILE_SLACK * SNAP_SLACK * 1e6, overlap, multiple
+        redraw_width, redraw_height, tile_mp * TILE_SLACK * SNAP_SLACK * _PIXELS_PER_MP, overlap, multiple
     )
     xs = _starts(redraw_width, tile_width, columns)
     ys = _starts(redraw_height, tile_height, rows)
@@ -152,7 +171,7 @@ def plan_tiles(
     overlap_x = tile_width - (xs[1] - xs[0]) if len(xs) > 1 else 0
     overlap_y = tile_height - (ys[1] - ys[0]) if len(ys) > 1 else 0
 
-    result_mp = result_width * result_height / 1e6
+    result_mp = result_width * result_height / _PIXELS_PER_MP
     growth_per_side = math.sqrt(result_mp / source_mp)
     # 目标百万像素明显小于原图：这是用户主动缩小，不算「尺寸太接近」
     shrunk = (not keep_size) and growth_per_side < SHRINK_BELOW
@@ -191,7 +210,7 @@ def describe_plan(plan: dict) -> str:
     tiles = len(plan["boxes"])
     tile_width, tile_height = plan["tile"]
     head = f"{source_width} x {source_height} px ({_megapixels_text(plan['source_megapixels'])})"
-    redraw = _megapixels_text(redraw_width * redraw_height / 1e6)
+    redraw = _megapixels_text(redraw_width * redraw_height / _PIXELS_PER_MP)
     if tiles == 1:
         how = f"按单块 {redraw_width} x {redraw_height} px 重绘"
     else:
@@ -201,7 +220,7 @@ def describe_plan(plan: dict) -> str:
         )
     if plan["keep_size"]:
         return f"{head} 保持原尺寸：{how}。"
-    text = f"{head} -> {result_width} x {result_height} px ({_megapixels_text(result_width * result_height / 1e6)})：{how}"
+    text = f"{head} -> {result_width} x {result_height} px ({_megapixels_text(result_width * result_height / _PIXELS_PER_MP)})：{how}"
     if plan["enlarged"]:
         text += "，之后用普通插值补齐到成品尺寸。这张图本来就小，没有更多细节可供重绘。"
     else:

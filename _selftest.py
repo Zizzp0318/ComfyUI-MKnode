@@ -1595,6 +1595,75 @@ if _h3u_loc:
           str(sorted(_h3u_loc.get("inputs", {}))))
 
 
+print("=== 23. 图像分块 / 分块合并（MK_TiledUpscale / MK_TiledUpscaleStitch）===")
+from Comfyui_MKnode.nodes import _tiled_helpers as _th  # noqa: E402
+from Comfyui_MKnode.nodes.tiled_upscale import (  # noqa: E402
+    MKTiledUpscale as _TU, MKTiledUpscaleStitch as _TS,
+)
+from comfy_extras.nodes_post_processing import ImageScaleToTotalPixels as _IS2TP  # noqa: E402
+
+
+def _mk_img(w, h):
+    g = _torch.linspace(0, 1, w).view(1, 1, w, 1).expand(1, h, w, 3).clone()
+    b = _torch.linspace(0, 1, h).view(1, h, 1, 1).expand(1, h, w, 1).clone()
+    return _torch.cat([g, b, _torch.full((1, h, w, 1), 0.5)], dim=-1)
+
+
+# ① 尺寸算法与官方 ImageScaleToTotalPixels 逐项一致
+for _w, _h, _mp, _st in [(2920, 1944, 1.0, 8), (1000, 800, 4.0, 32),
+                         (1920, 1080, 8.0, 32), (777, 1333, 1.0, 8)]:
+    _o = _IS2TP.execute(_torch.zeros(1, _h, _w, 3), "nearest-exact", _mp, _st).result[0]
+    _want = (int(_o.shape[2]), int(_o.shape[1]))
+    _got = _th.megapixel_size(_w, _h, _mp, _st)
+    check(f"  {_w}x{_h} {_mp}MP 步数{_st} 与官方缩放一致", _got == _want,
+          f"官方 {_want[0]}x{_want[1]} / 分块 {_got[0]}x{_got[1]}")
+
+# ② 对齐到倍数用官方舍入（银行家舍入）
+check("  snap_to_multiple(80, 32) = 64（.5 取偶）",
+      _th.snap_to_multiple(80, 32) == 64, _th.snap_to_multiple(80, 32))
+check("  snap_to_multiple(112, 32) = 128（3.5 取偶成 4）",
+      _th.snap_to_multiple(112, 32) == 128, _th.snap_to_multiple(112, 32))
+check("  snap_to_multiple(1000, 8) = 1000（已是倍数）",
+      _th.snap_to_multiple(1000, 8) == 1000, _th.snap_to_multiple(1000, 8))
+
+# ③ 分块规划内部自洽：MP 全部用 1024² 口径
+_plan = _th.plan_tiles(2920, 1944, 4.0, 2.0, 128, 32, 8.0)
+check("  source_megapixels = w*h/1048576",
+      abs(_plan["source_megapixels"] - 2920 * 1944 / (1024 * 1024)) < 1e-12,
+      _plan["source_megapixels"])
+check("  result = megapixel_size(原图, 4MP, 32)",
+      _plan["result"] == _th.megapixel_size(2920, 1944, 4.0, 32), _plan["result"])
+check("  result 宽高都是 32 的倍数",
+      _plan["result"][0] % 32 == 0 and _plan["result"][1] % 32 == 0, _plan["result"])
+check("  boxes 数量 = rows × columns",
+      len(_plan["boxes"]) == _plan["rows"] * _plan["columns"],
+      f'{len(_plan["boxes"])} vs {_plan["rows"]}x{_plan["columns"]}')
+check("  每块都落在重绘尺寸内",
+      all(0 <= x and 0 <= y and x2 <= _plan["redraw"][0] and y2 <= _plan["redraw"][1]
+          for (x, y, x2, y2) in _plan["boxes"]), _plan["boxes"][:2])
+
+# ④ 端到端：分块 -> 合并，尺寸 / 块数 / 值域
+for _w, _h, _mp, _st in [(512, 384, 1.0, 32), (640, 480, 2.0, 16)]:
+    _out = _TU.execute(_mk_img(_w, _h), _mp, None, 2.0, 64, _st, 8.0)
+    _tiles, _meta, _ref, _rw, _rh, _report = _out
+    _p = _meta["plan"]
+    _st_out = _TS.execute(_tiles, _meta, 0.0)
+    _raw = _st_out[0] if isinstance(_st_out, (list, tuple)) else _st_out.result[0]
+    _img = _raw[0] if isinstance(_raw, (list, tuple)) else _raw
+    check(f"  {_w}x{_h} 分块数 = len(boxes)", len(_tiles) == len(_p["boxes"]),
+          f'{len(_tiles)} vs {len(_p["boxes"])}')
+    check(f"  {_w}x{_h} 单块尺寸 = plan.tile",
+          (int(_tiles[0].shape[2]), int(_tiles[0].shape[1])) == tuple(_p["tile"]),
+          f'{(int(_tiles[0].shape[2]), int(_tiles[0].shape[1]))} vs {_p["tile"]}')
+    check(f"  {_w}x{_h} 成品宽高 = plan.result", (_rw, _rh) == _p["result"],
+          f"{(_rw, _rh)} vs {_p['result']}")
+    check(f"  {_w}x{_h} 合并输出尺寸 = 成品尺寸",
+          (int(_img.shape[2]), int(_img.shape[1])) == (_rw, _rh),
+          (int(_img.shape[2]), int(_img.shape[1])))
+    check(f"  {_w}x{_h} 合并输出值域在 [0,1]",
+          bool((_img >= -1e-5).all() and (_img <= 1 + 1e-5).all()),
+          f"min={float(_img.min()):.4f} max={float(_img.max()):.4f}")
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")
