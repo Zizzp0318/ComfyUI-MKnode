@@ -28,9 +28,11 @@
 
 图片槽位只有两种状态：
   scale_mode = off         原图直出（EXIF 旋转 + 转 RGB，不缩放）
-  scale_mode = megapixels  缩放到 target_megapixels 百万像素（等比，比例与原图一致）
+  scale_mode = megapixels  缩放到 target_megapixels 百万像素（1 MP = 1024×1024，
+                           与官方「缩放图像（像素）」同口径；宽高各自就近对齐到 size_multiple）
   scale_method            缩放方式：nearest-exact / bilinear / area / bicubic / lanczos（默认）
-不做尺寸对齐、不裁边：输出的宽高就是按总像素算出的精确值。
+对齐规则与官方一致（round(边长 × scale / 尺寸倍数) × 尺寸倍数），不裁边；
+宽高各自对齐，所以比例可能和原图有 1~3% 偏差（尺寸倍数为 1 时不偏差）。
 """
 
 import json
@@ -254,8 +256,9 @@ def resolve_media_path(path):
 
 # ── 图片槽位：缩放到目标总像素 ──────────────────────────────
 #
-# 「按总像素」时算精确目标 (tw, th)（等比），直接一次缩放到该尺寸；
-# 不做尺寸对齐、也不裁边 —— 输出尺寸就是精确目标，比例与原图一致。
+# 「按总像素」时用官方 ImageScaleToTotalPixels 的公式算目标 (tw, th)：
+#   round(边长 × scale / 尺寸倍数) × 尺寸倍数，scale = sqrt(MP × 1024² / 原面积)
+# 只缩放、不裁边；宽高各自对齐，比例可能和原图有 1~3% 偏差（尺寸倍数为 1 时无偏差）。
 
 def _clamp_target(nw, nh):
     """单边 / 总像素双重上限，超了按比例压回来。返回 (nw, nh, capped)。"""

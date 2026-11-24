@@ -628,7 +628,7 @@ function renderImageSlot(node, index, cell) {
         "border:1px solid var(--mk-h3m-border)", "background:var(--mk-h3m-btn-info)",
         "color:#fff", "font-size:10px", "cursor:pointer", "line-height:1",
     ].join(";"), "图片设置");
-    setBtn.title = "缩放模式 / 目标总像素 / 目标最长边 / 尺寸对齐 / 裁剪位置";
+    setBtn.title = "缩放模式 / 目标总像素 / 尺寸倍数 / 缩放方式";
     setBtn.addEventListener("mousedown", (e) => e.stopPropagation());
     setBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1485,7 +1485,7 @@ function openParamDialog(node, kind, index) {
         return { row, hint, presets, input };
     };
 
-    // 下拉字段：原生 select（选项值可为数字，如尺寸对齐）
+    // 下拉字段：原生 select（选项值可为数字，如缩放方式）
     const buildSelectField = (field) => {
         const row = el("div", "display:flex;align-items:center;gap:6px;margin-bottom:9px;");
         row.appendChild(labelOf(field));
