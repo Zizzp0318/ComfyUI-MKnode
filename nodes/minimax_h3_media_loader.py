@@ -1,4 +1,4 @@
-"""MK-MiniMax H3素材加载 / MK-MiniMax H3素材解包
+"""MK-多媒体素材加载 / MK-多媒体素材解包
 
 把「9 张参考图 + 3 段参考视频 + 3 段参考音频」的装载工作收进一个节点：面板由前端
 ``web/h3_media_loader.js`` 绘制（九宫格 + 试听/播放 + 每槽位开关与视频/音频参数），
@@ -6,7 +6,7 @@
 
 两个节点配对使用，中间只走一根线：
 
-    MK-MiniMax H3素材加载 ──ref2va参考总线（MK_REF2VA_BUS）──> MK-MiniMax H3素材解包 ──18 个素材口──> 参考生视频
+    MK-多媒体素材加载 ──素材总线（MK_REF2VA_BUS）──> MK-多媒体素材解包 ──18 个素材口──> 参考生视频
 
 - 加载：19 个槽位读盘后打包成一条总线（``{ref_image_1: tensor, ...}``），画布上只有一根线；
 - 解包：把总线拆回 18 个常驻素材口，口名与本包「MK-Minimax H3多参考生视频」的输入口逐字一致
@@ -63,7 +63,7 @@ OUTPUT_TYPES = tuple("AUDIO" if "audio" in key else "IMAGE" for key in OUTPUT_KE
 
 # 自定义总线类型：加载端打包、解包端拆开，只能这两头互连（与上游 JZL_REF2VA_BUS 区分）
 BUS_TYPE = "MK_REF2VA_BUS"
-BUS_NAME = "ref2va参考总线"
+BUS_NAME = "素材总线"
 
 # ── 图片槽位的缩放选项 ────────────────────────────────────
 # 只保留「禁用」与「按总像素」：按最长边 / 尺寸对齐 / 裁剪位置已移除
@@ -98,6 +98,7 @@ def _default_image_slot():
         "scale_mode": "off",              # off / megapixels
         "target_megapixels": MP_DEFAULT,  # 按总像素：目标总像素（MP）
         "scale_method": SCALE_METHOD_DEFAULT,   # 缩放方式（仅在缩放时生效）
+        "size_multiple": 1,               # 尺寸倍数：宽高就近对齐到该值的整数倍（1 = 不对齐）
     }
 
 
@@ -192,6 +193,7 @@ def parse_settings(raw):
         "scale_mode": _pick(it.get("scale_mode"), IMAGE_SCALE_MODES, "off"),
         "target_megapixels": _as_float(it.get("target_megapixels"), MP_DEFAULT, MP_MIN, MP_MAX),
         "scale_method": _pick(it.get("scale_method"), SCALE_METHODS, SCALE_METHOD_DEFAULT),
+        "size_multiple": _as_int(it.get("size_multiple"), 1, 1, 256),
     } for it in _slot_list(data, "images", IMAGE_COUNT)]
 
     audios = [{
@@ -266,10 +268,28 @@ def _clamp_target(nw, nh):
     return nw, nh, capped
 
 
-def _target_size(w, h, target_mp):
-    """按总像素算精确目标尺寸 → (tw, th, capped)。
+def _align_to_multiple(value, multiple):
+    """把 value 就近取整到 multiple 的整数倍，结果至少为一个 multiple。
 
-    目标总像素 = target_mp 百万像素；边长为原图 ×√(目标/原)，等比不失真。
+    与「MK-加载图像」的 size_multiple 同一套规则（四舍五入，不是向上取整）。
+    """
+    if multiple <= 1:
+        return max(1, int(value))
+    return max(multiple, ((int(value) + multiple // 2) // multiple) * multiple)
+
+
+def _align_down_to(value, multiple):
+    """向下取整到 multiple 的倍数（上限压回后用它保证仍然是倍数）。"""
+    if multiple <= 1:
+        return max(1, int(value))
+    return max(multiple, (int(value) // multiple) * multiple)
+
+
+def _target_size(w, h, target_mp, multiple=1):
+    """按总像素算目标尺寸 → (tw, th, capped)。
+
+    目标总像素 = target_mp 百万像素；边长为原图 ×√(目标/原)，等比不失真，
+    再把宽高就近对齐到 multiple 的整数倍（1 = 不对齐）。
     """
     if w <= 0 or h <= 0:
         return max(1, w), max(1, h), False
@@ -281,7 +301,16 @@ def _target_size(w, h, target_mp):
         return w, h, False
     tw = max(1, int(round(w * scale)))
     th = max(1, int(round(h * scale)))
-    return _clamp_target(tw, th)
+    tw, th, capped = _clamp_target(tw, th)
+    tw = _align_to_multiple(tw, multiple)
+    th = _align_to_multiple(th, multiple)
+    # 对齐后可能又越过上限（multiple 较大时最多多出 128px）：压回后再向下对齐到倍数
+    if max(tw, th) > MAX_IMAGE_EDGE or tw * th > MAX_IMAGE_PIXELS:
+        tw, th, _ = _clamp_target(tw, th)
+        tw = _align_down_to(tw, multiple)
+        th = _align_down_to(th, multiple)
+        capped = True
+    return tw, th, capped
 
 
 def _resample_of(method):
@@ -304,7 +333,8 @@ def prepare_image(path, item=None):
     note = ""
     if item.get("scale_mode", "off") != "megapixels":   # 禁用：原图直出
         return img, note
-    tw, th, capped = _target_size(w0, h0, item.get("target_megapixels") or MP_DEFAULT)
+    tw, th, capped = _target_size(w0, h0, item.get("target_megapixels") or MP_DEFAULT,
+                                  item.get("size_multiple") or 1)
     if (tw, th) != (w0, h0):
         img = img.resize((tw, th), _resample_of(item.get("scale_method")))
     if capped:
@@ -569,7 +599,7 @@ class MKMinimaxH3MediaLoader:
     RETURN_NAMES = (BUS_NAME,)
     FUNCTION = "load"
     CATEGORY = "MK节点"
-    # 不是输出节点：总线只要被「MK-MiniMax H3素材解包」接上就会执行，ui 摘要也照常回传；
+    # 不是输出节点：总线只要被「MK-多媒体素材解包」接上就会执行，ui 摘要也照常回传；
     # 悬空不接时不会白白读盘抽帧。
     OUTPUT_NODE = False
 
@@ -680,7 +710,7 @@ class MKMinimaxH3MediaLoader:
 # ── 解包节点 ──────────────────────────────────────────────────────
 
 class MKMinimaxH3MediaUnpack:
-    """把「MK-MiniMax H3素材加载」打的总线拆回 18 个素材口。
+    """把「MK-多媒体素材加载」打的总线拆回 18 个素材口。
 
     输出口名与本包「MK-Minimax H3多参考生视频」的输入口逐字一致，一根线一个口直连。
     总线里为 None 的槽位（未启用 / 未上传 / 文件丢失）解出来同样是 None，等于该口没连线。
@@ -692,7 +722,7 @@ class MKMinimaxH3MediaUnpack:
             "required": {
                 "bus": (BUS_TYPE, {
                     "force_input": True,
-                    "tooltip": "接「MK-MiniMax H3素材加载」的 ref2va参考总线",
+                    "tooltip": "接「MK-多媒体素材加载」的素材总线",
                 }),
             },
         }

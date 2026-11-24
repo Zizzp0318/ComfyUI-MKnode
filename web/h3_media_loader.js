@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 // ============================================================
-// MK-MiniMax H3素材加载 —— 前端（DOM 面板，旧 LiteGraph 与 Nodes 2.0 通用）
+// MK-多媒体素材加载 —— 前端（DOM 面板，旧 LiteGraph 与 Nodes 2.0 通用）
 //   把「素材库」子工作流（9 图 + 3 音频 + 3 视频）收成一个节点：
 //     上：3×3 九宫格参考图（正方形预览，长边自适应）
 //     中：3 个音频（预览窗 宽:高 = 2:1，带播放进度条 + 音频裁剪）
@@ -296,6 +296,13 @@ const IMAGE_FIELDS = [
         hint: "1.00 MP ≈ 100 万像素（如 1152×864）；等比缩放，比例与原图一致",
     },
     {
+        key: "size_multiple", label: "尺寸倍数", type: "number",
+        step: 1, min: 1, max: 256,
+        presets: [1, 8, 16, 32, 64],
+        showIf: (s) => s.scale_mode === "megapixels",
+        hint: "把缩放后的宽高就近对齐到该值的整数倍（1 = 不对齐），常用于避开 VAE 不整除",
+    },
+    {
         key: "scale_method", label: "缩放方式", type: "select", options: SCALE_METHODS,
         showIf: (s) => s.scale_mode === "megapixels",
         hint: "缩小建议 Lanczos / 区域；放大建议 Lanczos / 双三次；邻近-精确不产生新像素（块状）",
@@ -310,6 +317,7 @@ function defaultSettings() {
         images: Array.from({ length: IMG_COUNT }, () => ({
             path: "", enabled: true,
             scale_mode: "off", target_megapixels: 1, scale_method: SCALE_METHOD_DEFAULT,
+            size_multiple: 1,
         })),
         audios: Array.from({ length: AUDIO_COUNT }, () => ({
             path: "", enabled: true, start: 0, duration: 0,
@@ -350,6 +358,7 @@ function normalizeSettings(raw) {
         scale_mode: pickValue(it.scale_mode, SCALE_MODES),
         target_megapixels: clamp(toNum(it.target_megapixels, 1), 0.01, 64),
         scale_method: pickMethod(it.scale_method),
+        size_multiple: clamp(Math.round(toNum(it.size_multiple, 1)), 1, 256),
     }));
     base.audios = fill(src.audios, base.audios, (it) => ({
         path: String(it.path || ""),
@@ -1032,6 +1041,7 @@ function renderSlot(node, kind, index) {
     if (kind === "image") renderImageSlot(node, index, cell);
     else if (kind === "audio") renderAudioSlot(node, index, cell);
     else renderVideoSlot(node, index, cell);
+    updateSectionMeta(node, kind);       // 折叠头右侧的「N 个已载入」
     node.setDirtyCanvas?.(true, true);
 }
 
@@ -1576,11 +1586,21 @@ function openParamDialog(node, kind, index) {
 
 // ── 节点装配 ─────────────────────────────────────────────
 
-function sectionTitle(text) {
-    return el("div", [
-        "flex:0 0 auto", "font-size:11px", "font-weight:600", "color:var(--mk-h3m-info)",
-        "margin:2px 0 0", "letter-spacing:.3px",
-    ].join(";"), text);
+// 分组折叠状态：存在节点 properties（随工作流保存），键名沿用包内 mk_ 前缀
+const FOLDED_KEY = "mk_h3m_folded";
+
+function readFolded(node, kind, fallback) {
+    const m = node.properties?.[FOLDED_KEY];
+    return (m && typeof m[kind] === "boolean") ? m[kind] : fallback;
+}
+
+function writeFolded(node, kind, folded) {
+    if (!node.properties) node.properties = {};
+    const cur = node.properties[FOLDED_KEY];
+    const m = (cur && typeof cur === "object") ? { ...cur } : {};
+    m[kind] = folded;
+    node.properties[FOLDED_KEY] = m;
+    try { node.graph?.setDirtyCanvas?.(true, true); } catch (_) {}
 }
 
 function gridStyle() {
@@ -1612,6 +1632,99 @@ function buildSlotGrid(node, kind, count, cellStyle) {
     return grid;
 }
 
+// 可折叠分组：标题行可点，折叠时只藏显示、不影响装载
+function buildSection(node, kind, title, count, cellStyle, defaultFolded) {
+    const folded = readFolded(node, kind, defaultFolded);
+
+    const header = el("div", [
+        "flex:0 0 auto", "display:flex", "align-items:center", "gap:6px",
+        "padding:2px 4px", "border-radius:5px", "cursor:pointer",
+        "user-select:none", "transition:background .12s",
+    ].join(";"));
+    header.title = "点击折叠 / 展开这一组（折叠只影响显示，装载照旧）";
+
+    const arrow = el("span", [
+        "flex:0 0 auto", "width:10px", "text-align:center",
+        "font-size:9px", "color:var(--mk-h3m-text-dim)", "line-height:1",
+    ].join(";"), folded ? "▶" : "▼");
+    const label = el("span", [
+        "flex:0 0 auto", "font-size:11px", "font-weight:600",
+        "color:var(--mk-h3m-info)", "letter-spacing:.3px",
+    ].join(";"), title);
+    const meta = el("span", [
+        "flex:0 1 auto", "margin-left:auto", "font-size:10px",
+        "color:var(--mk-h3m-text-dim)", "white-space:nowrap",
+        "overflow:hidden", "text-overflow:ellipsis",
+    ].join(";"), "");
+
+    header.appendChild(arrow);
+    header.appendChild(label);
+    header.appendChild(meta);
+
+    const body = buildSlotGrid(node, kind, count, cellStyle);
+    body.style.display = folded ? "none" : "grid";
+
+    header.addEventListener("mouseenter", () => {
+        header.style.background = "var(--mk-h3m-bg-raise)";
+    });
+    header.addEventListener("mouseleave", () => {
+        header.style.background = "transparent";
+    });
+    header.addEventListener("pointerdown", (e) => e.stopPropagation());
+    header.addEventListener("mousedown", (e) => e.stopPropagation());
+    header.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const willOpen = body.style.display === "none";
+        body.style.display = willOpen ? "grid" : "none";
+        arrow.textContent = willOpen ? "▼" : "▶";
+        writeFolded(node, kind, !willOpen);
+        // 折叠 / 展开后让节点高度重新贴合内容（允许收缩，否则底部会永远留一截）
+        setTimeout(() => {
+            try { node.__mkH3M?.fitPanelHeight?.(true); } catch (_) {}
+        }, 30);
+    });
+
+    node.__mkH3M.sections[kind] = { header, body, meta, label, arrow };
+    return { header, body };
+}
+
+// 工作流载入后 properties 才反序列化 → 再按存下来的折叠状态重应用一遍
+function applyFoldedState(node) {
+    const st = node.__mkH3M;
+    if (!st?.sections) return;
+    const m = node.properties?.[FOLDED_KEY];
+    if (!m || typeof m !== "object") return;
+    for (const kind of ["image", "audio", "video"]) {
+        const sec = st.sections[kind];
+        if (!sec || typeof m[kind] !== "boolean") continue;
+        const folded = m[kind];
+        sec.body.style.display = folded ? "none" : "grid";
+        if (sec.arrow) sec.arrow.textContent = folded ? "▶" : "▼";
+    }
+    setTimeout(() => {
+        try { st.fitPanelHeight?.(true); } catch (_) {}
+    }, 30);
+}
+
+// 折叠头右侧的「N 个已载入」提示（折叠时也能看出这组有没有素材）
+function updateSectionMeta(node, kind) {
+    const sec = node.__mkH3M?.sections?.[kind];
+    if (!sec) return;
+    const settings = readSettings(node);
+    const list = settings[`${kind}s`] || [];
+    const loaded = list.filter((it) => it.path);
+    const enabled = loaded.filter((it) => it.enabled).length;
+    if (!loaded.length) {
+        sec.meta.textContent = "";
+        sec.meta.style.color = "var(--mk-h3m-text-dim)";
+        return;
+    }
+    sec.meta.textContent = enabled === loaded.length
+        ? `${loaded.length} 个已载入`
+        : `${loaded.length} 个已载入 · ${loaded.length - enabled} 个已关闭`;
+    sec.meta.style.color = enabled ? "var(--mk-h3m-ok)" : "var(--mk-h3m-text-dim)";
+}
+
 function buildPanel(node) {
     const container = el("div", [
         "width:100%", "height:100%", "display:flex", "flex-direction:column", "gap:6px",
@@ -1623,24 +1736,33 @@ function buildPanel(node) {
     container.addEventListener("mousedown", (e) => e.stopPropagation());
 
     const head = el("div", "flex:0 0 auto;display:flex;align-items:center;gap:8px;");
-    head.appendChild(el("div", "font-size:12px;font-weight:600;color:var(--mk-h3m-text-strong);", "📥 MiniMax H3素材加载"));
+    head.appendChild(el("div", "font-size:12px;font-weight:600;color:var(--mk-h3m-text-strong);", "📥 多媒体素材加载"));
     const status = el("div", [
         "flex:1 1 auto", "font-size:10px", "color:var(--mk-h3m-text-dim)",
         "white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis", "text-align:right",
-    ].join(";"), "9 图 丨 3 音频 丨 3 视频 → ref2va 参考总线");
+    ].join(";"), "9 图 丨 3 音频 丨 3 视频 → 素材总线");
     status.title = "执行后显示实际载入数量";
     head.appendChild(status);
     node.__mkH3M.status = status;
     container.appendChild(head);
 
-    container.appendChild(sectionTitle("🖼️ 参考图 1–9"));
-    container.appendChild(buildSlotGrid(node, "image", IMG_COUNT, "1 / 1"));
+    // 参考图：默认展开
+    const imgSec = buildSection(node, "image", `🖼️ 参考图 1–${IMG_COUNT}`,
+                                IMG_COUNT, "1 / 1", false);
+    container.appendChild(imgSec.header);
+    container.appendChild(imgSec.body);
 
-    container.appendChild(sectionTitle("🎧 参考音频 1–3"));
-    container.appendChild(buildSlotGrid(node, "audio", AUDIO_COUNT, "2 / 1"));
+    // 参考音频：默认折叠（平时用不到）
+    const audSec = buildSection(node, "audio", `🎧 参考音频 1–${AUDIO_COUNT}`,
+                                AUDIO_COUNT, "2 / 1", true);
+    container.appendChild(audSec.header);
+    container.appendChild(audSec.body);
 
-    container.appendChild(sectionTitle("🎬 参考视频 1–3"));
-    container.appendChild(buildSlotGrid(node, "video", VIDEO_COUNT, "1 / 1"));
+    // 参考视频：默认折叠
+    const vidSec = buildSection(node, "video", `🎬 参考视频 1–${VIDEO_COUNT}`,
+                                VIDEO_COUNT, "1 / 1", true);
+    container.appendChild(vidSec.header);
+    container.appendChild(vidSec.body);
 
     return container;
 }
@@ -1653,6 +1775,7 @@ function setupMediaLoader(node) {
         settings: normalizeSettings(readWidgetValue(widget)),
         widget,
         cells: { image: [], audio: [], video: [] },
+        sections: { image: null, audio: null, video: null },   // 折叠头（含已载入提示）
         status: null,
     };
 
@@ -1676,9 +1799,11 @@ function setupMediaLoader(node) {
         try { delete dom.computeSize; } catch (_) { dom.computeSize = undefined; }
         dom.options = dom.options || {};
         dom.options.serialize = false;
-        dom.options.getMinHeight = () => 900;
+        // 最小高度只留「三个分组标题」的余量：实际高度由 fitPanelHeight 精确贴合内容，
+        // 折叠后能一直缩到只剩标题行（给 900 会永远在底部留一截空白）
+        dom.options.getMinHeight = () => 220;
         dom.options.getHeight = () => "100%";
-        dom.computeLayoutSize = () => ({ minHeight: 900, maxHeight: undefined, minWidth: 640 });
+        dom.computeLayoutSize = () => ({ minHeight: 220, maxHeight: undefined, minWidth: 640 });
     }
     node.__mkH3M.dom = dom;
 
@@ -1687,7 +1812,7 @@ function setupMediaLoader(node) {
         try {
             const w = Number(node.size?.[0]);
             if (Number.isFinite(w) && w < 640) {
-                node.setSize?.([640, Math.max(node.size?.[1] || 1220, 900)]);
+                node.setSize?.([640, Math.max(node.size?.[1] || 780, 220)]);
             }
         } catch (_) {}
     };
@@ -1709,6 +1834,7 @@ function setupMediaLoader(node) {
     let selfResizing = false;
     // overflow:hidden 时 scrollHeight 永远 ≥ clientHeight，量不出「内容比视口矮」→ 累加子元素高度。
     // 子元素用 getBoundingClientRect（会被画布缩放），除以容器自身的缩放系数换算回 CSS px，避免取整误差。
+    // 折叠起来的分组（display:none）整段跳过，连它的 gap 也不算，这样折叠后高度能真正收下去。
     const measureContentHeight = () => {
         const kids = container.children;
         if (!kids || !kids.length) return container.scrollHeight;
@@ -1722,11 +1848,14 @@ function setupMediaLoader(node) {
             : 1;
         const safeScale = (Number.isFinite(scale) && scale > 0.05) ? scale : 1;
         let h = 0;
+        let visible = 0;
         for (let i = 0; i < kids.length; i++) {
+            if (kids[i].style.display === "none") continue;   // 折叠掉的整组不占高度
             const kh = kids[i].getBoundingClientRect().height;
             h += kh > 0 ? kh / safeScale : kids[i].offsetHeight;
+            visible += 1;
         }
-        h += gap * (kids.length - 1);
+        h += gap * Math.max(0, visible - 1);
         return Math.ceil(h + padTop + padBottom);
     };
     const fitPanelHeight = () => {
@@ -1743,7 +1872,7 @@ function setupMediaLoader(node) {
             if (shouldResize) {
                 // 自己改的尺寸不要再回头量一次（改完布局还没生效，会越量越大）
                 selfResizing = true;
-                node.setSize?.([node.size?.[0] || 700, cur + delta]);
+                node.setSize?.([node.size?.[0] || 700, Math.max(220, cur + delta)]);
                 setTimeout(() => { selfResizing = false; }, 120);
                 // 复核一次：aspect-ratio 取整可能让真实内容比预算多几像素，按实测差值补齐（只补一次，不会循环）
                 clearTimeout(verifyTimer);
@@ -1763,7 +1892,8 @@ function setupMediaLoader(node) {
         clearTimeout(fitTimer);
         fitTimer = setTimeout(() => requestAnimationFrame(fitPanelHeight), 30);
     };
-    node.__mkH3M.fitPanelHeight = () => scheduleFit(false);
+    // 折叠 / 展开需要「允许收缩」，否则节点会一直停在展开时的高度，底部留着空白
+    node.__mkH3M.fitPanelHeight = (allowShrink = false) => scheduleFit(!!allowShrink);
 
     let lastWidth = Number(node.size?.[0]) || 0;
     const prevResize = node.onResize;
@@ -1790,11 +1920,11 @@ function setupMediaLoader(node) {
         };
     }
 
-    // 首次布局：默认高度按「3 行图 + 1 行音频 + 1 行视频」给足，再贴合实际内容
+    // 首次布局：按「音频 / 视频默认折叠」给个接近真实内容的初始高度，随后再精确贴合
     lockWidth();
     syncWidth();
-    if (!Number.isFinite(node.size?.[1]) || node.size[1] < 1000) {
-        try { node.setSize?.([node.size?.[0] || 700, 1220]); } catch (_) {}
+    if (!Number.isFinite(node.size?.[1]) || node.size[1] < 700) {
+        try { node.setSize?.([node.size?.[0] || 700, 800]); } catch (_) {}
     }
     renderAllSlots(node);
     lastWidth = Number(node.size?.[0]) || 0;
@@ -1862,6 +1992,7 @@ app.registerExtension({
             const self = this;
             [0, 120, 400].forEach((ms) => setTimeout(() => {
                 try { refreshFromWidget(self); } catch (_) {}
+                try { applyFoldedState(self); } catch (_) {}
             }, ms));
             return r;
         };

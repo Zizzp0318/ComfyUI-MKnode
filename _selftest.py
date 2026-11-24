@@ -1372,9 +1372,9 @@ _h3m_mod = sys.modules.get("Comfyui_MKnode.nodes.minimax_h3_media_loader")
 check("  加载节点已注册", _h3m is not None)
 check("  解包节点已注册", _h3u is not None)
 check("  加载节点显示名", pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaLoader")
-      == "MK-MiniMax H3素材加载", str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaLoader")))
+      == "MK-多媒体素材加载", str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaLoader")))
 check("  解包节点显示名", pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaUnpack")
-      == "MK-MiniMax H3素材解包", str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaUnpack")))
+      == "MK-多媒体素材解包", str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaUnpack")))
 check("  两个节点都在 MK节点 分类",
       getattr(_h3m, "CATEGORY", "") == "MK节点" and getattr(_h3u, "CATEGORY", "") == "MK节点")
 
@@ -1384,7 +1384,7 @@ check("  加载节点输入只有 media_settings",
       list(_h3m.INPUT_TYPES()["required"]) == ["media_settings"],
       str(list(_h3m.INPUT_TYPES()["required"])))
 check("  加载节点只输出一条总线",
-      _h3m.RETURN_TYPES == (_h3_bus,) and _h3m.RETURN_NAMES == ("ref2va参考总线",),
+      _h3m.RETURN_TYPES == (_h3_bus,) and _h3m.RETURN_NAMES == ("素材总线",),
       f"{_h3m.RETURN_TYPES} / {_h3m.RETURN_NAMES}")
 
 check("  解包节点输入是一条总线", list(_h3u.INPUT_TYPES()["required"]) == ["bus"],
@@ -1448,8 +1448,9 @@ _h3img_def = _h3img.parse_settings("")["images"][0]
 check("  图片设置默认：禁用 + 目标 1.00MP",
       (_h3img_def["scale_mode"], _h3img_def["target_megapixels"]) == ("off", 1.0),
       str({k: _h3img_def[k] for k in ("scale_mode", "target_megapixels")}))
-check("  图片槽位只剩 5 个键（最长边 / 对齐 / 裁剪位置已移除）",
-      set(_h3img_def) == {"path", "enabled", "scale_mode", "target_megapixels", "scale_method"},
+check("  图片槽位只剩 6 个键（最长边 / 对齐 / 裁剪位置已移除）",
+      set(_h3img_def) == {"path", "enabled", "scale_mode", "target_megapixels",
+                         "scale_method", "size_multiple"},
       str(sorted(_h3img_def)))
 check("  缩放模式只剩 off / megapixels",
       tuple(_h3img.IMAGE_SCALE_MODES) == ("off", "megapixels"),
@@ -1470,7 +1471,8 @@ _h3img_bad = _h3img.parse_settings({"images": [{
     "crop_position": "火星", "align": 0, "crop_ratio": "1:1"}]})["images"][0]
 check("  脏数据回落（mode→off、MP→64、旧字段全部丢弃）",
       (_h3img_bad["scale_mode"], _h3img_bad["target_megapixels"]) == ("off", 64.0)
-      and set(_h3img_bad) == {"path", "enabled", "scale_mode", "target_megapixels", "scale_method"},
+      and set(_h3img_bad) == {"path", "enabled", "scale_mode", "target_megapixels",
+                              "scale_method", "size_multiple"},
       str(_h3img_bad))
 check("  旧「按最长边」模式回落 off",
       _h3img.parse_settings({"images": [{"scale_mode": "longest_edge"}]})["images"][0]["scale_mode"]
@@ -1487,6 +1489,20 @@ check("  目标 = 原面积时不动（0.8MP）",
 check("  比例保持：3000x1000 缩到 1MP -> 1732x577",
       _h3img._target_size(3000, 1000, 1.0)[:2] == (1732, 577),
       str(_h3img._target_size(3000, 1000, 1.0)))
+check("  尺寸倍数：_align_to_multiple 就近对齐", 
+      _h3img._align_to_multiple(1118, 32) == 1120
+      and _h3img._align_to_multiple(1118, 64) == 1088
+      and _h3img._align_to_multiple(1118, 1) == 1118,
+      str((_h3img._align_to_multiple(1118, 32), _h3img._align_to_multiple(1118, 64))))
+check("  尺寸倍数：_target_size 带 multiple", 
+      _h3img._target_size(1000, 800, 1.0, 1)[:2] == (1118, 894)
+      and _h3img._target_size(1000, 800, 1.0, 32)[:2] == (1120, 896)
+      and _h3img._target_size(1000, 800, 1.0, 64)[:2] == (1088, 896),
+      str(_h3img._target_size(1000, 800, 1.0, 64)))
+check("  尺寸倍数：默认 1，脏值钳到 1..256", 
+      _h3img.parse_settings("")["images"][0]["size_multiple"] == 1
+      and _h3img.parse_settings({"images": [{"size_multiple": 0}]})["images"][0]["size_multiple"] == 1
+      and _h3img.parse_settings({"images": [{"size_multiple": 999}]})["images"][0]["size_multiple"] == 256)
 check("  目标过大：被上限压回且 capped=True",
       _h3img._target_size(2000, 1000, 64.0)[2] is True
       and max(_h3img._target_size(2000, 1000, 64.0)[:2]) <= _h3img.MAX_IMAGE_EDGE,

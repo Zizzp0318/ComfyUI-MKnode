@@ -178,8 +178,8 @@
     }
   },
   "MK_MinimaxH3MediaLoader": {
-    "display_name": "MK-MiniMax H3素材加载",
-    "description": "9 张参考图 + 3 段参考视频（含原声）+ 3 段参考音频收进一个面板：每格带编号与开关，图片可按总像素等比缩放（可选缩放方式）或原图直出，音频在波形图上框选裁剪区间并试听，视频可设强制帧率 / 跳过帧数 / 输出宽高 / 帧数上限。执行后打包成一条 ref2va 参考总线，接到「MK-MiniMax H3素材解包」即可拆出 18 个素材口。",
+    "display_name": "MK-多媒体素材加载",
+    "description": "9 张参考图 + 3 段参考视频（含原声）+ 3 段参考音频收进一个面板：每格带编号与开关，图片可按总像素等比缩放（可选尺寸倍数与缩放方式）或原图直出，音频在波形图上框选裁剪区间并试听，视频可设强制帧率 / 跳过帧数 / 输出宽高 / 帧数上限。执行后打包成一条素材总线，接到「MK-多媒体素材解包」即可拆出 18 个素材口。",
     "inputs": {
       "media_settings": {
         "name": "素材配置",
@@ -188,18 +188,18 @@
     },
     "outputs": {
       "0": {
-        "name": "ref2va参考总线",
-        "tooltip": "19 个槽位打包成的一条总线，接到「MK-MiniMax H3素材解包」的输入口。"
+        "name": "素材总线",
+        "tooltip": "19 个槽位打包成的一条总线，接到「MK-多媒体素材解包」的输入口。"
       }
     }
   },
   "MK_MinimaxH3MediaUnpack": {
-    "display_name": "MK-MiniMax H3素材解包",
-    "description": "把「MK-MiniMax H3素材加载」打的总线拆回 18 个素材口，口名与「MK-Minimax H3多参考生视频」的输入口逐字一致，一根线一个口直连。",
+    "display_name": "MK-多媒体素材解包",
+    "description": "把「MK-多媒体素材加载」打的总线拆回 18 个素材口，口名与「MK-Minimax H3多参考生视频」的输入口逐字一致，一根线一个口直连。",
     "inputs": {
       "bus": {
-        "name": "ref2va参考总线",
-        "tooltip": "接「MK-MiniMax H3素材加载」的 ref2va参考总线输出。"
+        "name": "素材总线",
+        "tooltip": "接「MK-多媒体素材加载」的素材总线输出。"
       }
     },
     "outputs": {
