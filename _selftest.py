@@ -1513,6 +1513,21 @@ check("  图片槽位只剩 6 个键（最长边 / 对齐 / 裁剪位置已移�
       set(_h3img_def) == {"path", "enabled", "scale_mode", "target_megapixels",
                          "scale_method", "size_multiple"},
       str(sorted(_h3img_def)))
+# 新节点默认所有槽位关闭（放素材时由前端自动打开）
+_h3_all_off = lambda cfg: all(
+    not it["enabled"] for grp in ("images", "audios", "videos") for it in cfg[grp])
+check("  新节点默认所有槽位关闭（19 个槽位全 off）",
+      _h3_all_off(_h3img.parse_settings("")),
+      str({g: [it["enabled"] for it in _h3img.parse_settings("")[g]] for g in
+           ("images", "audios", "videos")}))
+_h3_widget_default = json.loads(
+    _h3m.INPUT_TYPES()["required"]["media_settings"][1]["default"])
+check("  INPUT_TYPES 默认 JSON 里的槽位也是关闭的",
+      _h3_all_off(_h3img.parse_settings(_h3_widget_default)),
+      str({g: [it["enabled"] for it in _h3_widget_default[g]] for g in
+           ("images", "audios", "videos")}))
+check("  没写 enabled 字段也算关闭（脏数据不偷偷打开）",
+      _h3img.parse_settings({"images": [{"path": "a.png"}]})["images"][0]["enabled"] is False)
 check("  缩放模式只剩 off / megapixels",
       tuple(_h3img.IMAGE_SCALE_MODES) == ("off", "megapixels"),
       str(_h3img.IMAGE_SCALE_MODES))

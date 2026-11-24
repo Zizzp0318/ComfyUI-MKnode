@@ -111,9 +111,9 @@ MP_MIN, MP_MAX, MP_DEFAULT = 0.01, 64.0, 1.0          # 百万像素（MP）
 # ── 配置 JSON：解析 / 归一化（前端写什么进来都不能把后端弄崩） ─────────────
 
 def _default_image_slot():
-    """图片槽位默认值：不缩放、原图直出。"""
+    """图片槽位默认值：关闭 + 不缩放（原图直出）。放进素材后前端会自动打开开关。"""
     return {
-        "path": "", "enabled": True,
+        "path": "", "enabled": False,
         "scale_mode": "off",              # off / megapixels
         "target_megapixels": MP_DEFAULT,  # 按总像素：目标总像素（MP）
         "scale_method": SCALE_METHOD_DEFAULT,   # 缩放方式（仅在缩放时生效）
@@ -122,12 +122,13 @@ def _default_image_slot():
 
 
 def _default_settings():
+    # 新节点默认所有槽位都关闭：只打开真正用到的，避免空槽位影响下游（见 README）
     return {
         "version": 1,
         "images": [_default_image_slot() for _ in range(IMAGE_COUNT)],
-        "audios": [{"path": "", "enabled": True, "start": 0.0, "duration": 0.0}
+        "audios": [{"path": "", "enabled": False, "start": 0.0, "duration": 0.0}
                    for _ in range(AUDIO_COUNT)],
-        "videos": [{"path": "", "enabled": True, "force_rate": 0.0, "skip": 0,
+        "videos": [{"path": "", "enabled": False, "force_rate": 0.0, "skip": 0,
                     "width": 0, "height": 0, "cap": 0} for _ in range(VIDEO_COUNT)],
     }
 
@@ -208,7 +209,7 @@ def parse_settings(raw):
 
     images = [{
         "path": _as_path(it.get("path")),
-        "enabled": _as_bool(it.get("enabled"), True),
+        "enabled": _as_bool(it.get("enabled"), False),
         "scale_mode": _pick(it.get("scale_mode"), IMAGE_SCALE_MODES, "off"),
         "target_megapixels": _as_float(it.get("target_megapixels"), MP_DEFAULT, MP_MIN, MP_MAX),
         "scale_method": _pick(it.get("scale_method"), SCALE_METHODS, SCALE_METHOD_DEFAULT),
@@ -217,14 +218,14 @@ def parse_settings(raw):
 
     audios = [{
         "path": _as_path(it.get("path")),
-        "enabled": _as_bool(it.get("enabled"), True),
+        "enabled": _as_bool(it.get("enabled"), False),
         "start": _as_float(it.get("start"), 0.0, 0.0),
         "duration": _as_float(it.get("duration"), 0.0, 0.0),
     } for it in _slot_list(data, "audios", AUDIO_COUNT)]
 
     videos = [{
         "path": _as_path(it.get("path")),
-        "enabled": _as_bool(it.get("enabled"), True),
+        "enabled": _as_bool(it.get("enabled"), False),
         "force_rate": _as_float(it.get("force_rate"), 0.0, 0.0, 240.0),
         "skip": _as_int(it.get("skip"), 0, 0),
         "width": _as_int(it.get("width"), 0, 0),

@@ -33,6 +33,14 @@ const IMG_COUNT = 9;
 const AUDIO_COUNT = 3;
 const VIDEO_COUNT = 3;
 
+// 节点固定最小尺寸：只能拉大，不能拉小（拖到比它还小会被夹回这个值）
+// 宽 640 = 3 列正方形格子的下限；高 800 ≈ 面板自然高度（九宫格 + 三个分组标题，
+// 音频/视频默认折叠时的整体高度），再往下拖只会把内容裁掉，所以干脆锁死
+const MIN_NODE_W = 640;
+const MIN_NODE_H = 800;
+// 绝对下限：主动折叠分组后，节点可以比 MIN_NODE_H 更矮，但不会低于这个值
+const HARD_MIN_H = 220;
+
 // ── 配色：自带一套 --mk-h3m-* 变量 ─────────────────────────
 // 面板里所有颜色都写成 var(--mk-h3m-*)，深/浅主题各一套值（照搬上游 jz_theme 的色板），
 // 只在本包里用，和上游插件同装也不会互相覆盖。切主题时由 MutationObserver 重算。
@@ -312,18 +320,19 @@ const IMAGE_FIELDS = [
 // ── 配置（与后端 parse_settings 一一对应） ─────────────────
 
 function defaultSettings() {
+    // 新节点默认所有槽位都关闭：只打开真正用到的，放进素材时 applyUploadedFile 会自动打开开关
     return {
         version: 1,
         images: Array.from({ length: IMG_COUNT }, () => ({
-            path: "", enabled: true,
+            path: "", enabled: false,
             scale_mode: "off", target_megapixels: 1, scale_method: SCALE_METHOD_DEFAULT,
             size_multiple: 1,
         })),
         audios: Array.from({ length: AUDIO_COUNT }, () => ({
-            path: "", enabled: true, start: 0, duration: 0,
+            path: "", enabled: false, start: 0, duration: 0,
         })),
         videos: Array.from({ length: VIDEO_COUNT }, () => ({
-            path: "", enabled: true, force_rate: 0, skip: 0, width: 0, height: 0, cap: 0,
+            path: "", enabled: false, force_rate: 0, skip: 0, width: 0, height: 0, cap: 0,
         })),
     };
 }
@@ -354,7 +363,7 @@ function normalizeSettings(raw) {
 
     base.images = fill(src.images, base.images, (it) => ({
         path: String(it.path || ""),
-        enabled: it.enabled !== false,
+        enabled: it.enabled === true,
         scale_mode: pickValue(it.scale_mode, SCALE_MODES),
         target_megapixels: clamp(toNum(it.target_megapixels, 1), 0.01, 64),
         scale_method: pickMethod(it.scale_method),
@@ -362,13 +371,13 @@ function normalizeSettings(raw) {
     }));
     base.audios = fill(src.audios, base.audios, (it) => ({
         path: String(it.path || ""),
-        enabled: it.enabled !== false,
+        enabled: it.enabled === true,
         start: Math.max(0, toNum(it.start, 0)),
         duration: Math.max(0, toNum(it.duration, 0)),
     }));
     base.videos = fill(src.videos, base.videos, (it) => ({
         path: String(it.path || ""),
-        enabled: it.enabled !== false,
+        enabled: it.enabled === true,
         force_rate: Math.max(0, toNum(it.force_rate, 0)),
         skip: Math.max(0, Math.round(toNum(it.skip, 0))),
         width: Math.max(0, Math.round(toNum(it.width, 0))),
@@ -1610,10 +1619,10 @@ function gridStyle() {
     ].join(";");
 }
 
-function buildSlotGrid(node, kind, count, cellStyle) {
+function buildSlotGrid(node, kind, count, cellStyle, start = 0) {
     const grid = el("div", gridStyle());
-    node.__mkH3M.cells[kind] = [];
-    for (let i = 0; i < count; i++) {
+    if (!start) node.__mkH3M.cells[kind] = [];
+    for (let i = start; i < start + count; i++) {
         const cell = slotShell([`aspect-ratio:${cellStyle}`, "width:100%"]);
         bindDropTarget(node, cell, kind, i);
         cell.addEventListener("mousedown", (e) => {
@@ -1626,30 +1635,29 @@ function buildSlotGrid(node, kind, count, cellStyle) {
             e.stopPropagation();
             pickFile(node, kind, i);
         });
-        node.__mkH3M.cells[kind].push(cell);
+        node.__mkH3M.cells[kind][i] = cell;
         grid.appendChild(cell);
     }
     return grid;
 }
 
-// 可折叠分组：标题行可点，折叠时只藏显示、不影响装载
-function buildSection(node, kind, title, count, cellStyle, defaultFolded) {
-    const folded = readFolded(node, kind, defaultFolded);
-
+// 折叠头（整组 / 参考图的三档共用）：点标题行切换，折叠只藏显示、不影响装载
+function makeFoldHeader(node, key, title, defaultFolded, applyFold, small = false) {
     const header = el("div", [
         "flex:0 0 auto", "display:flex", "align-items:center", "gap:6px",
-        "padding:2px 4px", "border-radius:5px", "cursor:pointer",
+        small ? "padding:0 4px" : "padding:2px 4px", "border-radius:5px", "cursor:pointer",
         "user-select:none", "transition:background .12s",
     ].join(";"));
-    header.title = "点击折叠 / 展开这一组（折叠只影响显示，装载照旧）";
+    header.title = "点击折叠 / 展开（折叠只影响显示，装载照旧）";
 
     const arrow = el("span", [
         "flex:0 0 auto", "width:10px", "text-align:center",
         "font-size:9px", "color:var(--mk-h3m-text-dim)", "line-height:1",
-    ].join(";"), folded ? "▶" : "▼");
+    ].join(";"), "▼");
     const label = el("span", [
-        "flex:0 0 auto", "font-size:11px", "font-weight:600",
-        "color:var(--mk-h3m-info)", "letter-spacing:.3px",
+        "flex:0 0 auto", small ? "font-size:10px" : "font-size:11px", "font-weight:600",
+        "color:" + (small ? "var(--mk-h3m-text-dim)" : "var(--mk-h3m-info)"),
+        "letter-spacing:.3px",
     ].join(";"), title);
     const meta = el("span", [
         "flex:0 1 auto", "margin-left:auto", "font-size:10px",
@@ -1661,8 +1669,16 @@ function buildSection(node, kind, title, count, cellStyle, defaultFolded) {
     header.appendChild(label);
     header.appendChild(meta);
 
-    const body = buildSlotGrid(node, kind, count, cellStyle);
-    body.style.display = folded ? "none" : "grid";
+    let folded = readFolded(node, key, defaultFolded);
+    const paint = () => { arrow.textContent = folded ? "▶" : "▼"; };
+    const setFold = (f, write = true) => {
+        folded = !!f;
+        paint();
+        applyFold?.(folded);
+        if (write) writeFolded(node, key, folded);
+    };
+    paint();
+    applyFold?.(folded);
 
     header.addEventListener("mouseenter", () => {
         header.style.background = "var(--mk-h3m-bg-raise)";
@@ -1674,18 +1690,56 @@ function buildSection(node, kind, title, count, cellStyle, defaultFolded) {
     header.addEventListener("mousedown", (e) => e.stopPropagation());
     header.addEventListener("click", (e) => {
         e.stopPropagation();
-        const willOpen = body.style.display === "none";
-        body.style.display = willOpen ? "grid" : "none";
-        arrow.textContent = willOpen ? "▼" : "▶";
-        writeFolded(node, kind, !willOpen);
+        setFold(!folded);
         // 折叠 / 展开后让节点高度重新贴合内容（允许收缩，否则底部会永远留一截）
         setTimeout(() => {
             try { node.__mkH3M?.fitPanelHeight?.(true); } catch (_) {}
         }, 30);
     });
 
-    node.__mkH3M.sections[kind] = { header, body, meta, label, arrow };
-    return { header, body };
+    return { header, arrow, label, meta, setFold, isFolded: () => folded };
+}
+
+// 可折叠分组：标题行可点，折叠时只藏显示、不影响装载
+function buildSection(node, kind, title, count, cellStyle, defaultFolded) {
+    const body = buildSlotGrid(node, kind, count, cellStyle);
+    const hdr = makeFoldHeader(node, kind, title, defaultFolded, (folded) => {
+        body.style.display = folded ? "none" : "grid";
+    });
+
+    node.__mkH3M.sections[kind] = {
+        header: hdr.header, body, meta: hdr.meta, label: hdr.label, arrow: hdr.arrow,
+    };
+    return { header: hdr.header, body };
+}
+
+// 参考图 1–9 再分三档折叠（1–3 / 4–6 / 7–9）：整组折叠头 + 三个小折叠头
+function buildImageSection(node) {
+    const body = el("div", "flex:0 0 auto;display:flex;flex-direction:column;gap:6px");
+    node.__mkH3M.rows = [];
+
+    for (let r = 0; r * 3 < IMG_COUNT; r++) {
+        const first = r * 3 + 1;
+        const last = Math.min(first + 2, IMG_COUNT);
+        const grid = buildSlotGrid(node, "image", last - first + 1, "1 / 1", r * 3);
+        const wrap = el("div", "flex:0 0 auto;display:flex;flex-direction:column;gap:4px");
+        const hdr = makeFoldHeader(node, `image_row${r + 1}`, `图 ${first}–${last}`, false,
+            (folded) => { grid.style.display = folded ? "none" : "grid"; }, true);
+        wrap.appendChild(hdr.header);
+        wrap.appendChild(grid);
+        body.appendChild(wrap);
+        node.__mkH3M.rows.push({
+            header: hdr.header, body: grid, arrow: hdr.arrow, meta: hdr.meta, start: r * 3,
+        });
+    }
+
+    const hdr = makeFoldHeader(node, "image", `🖼️ 参考图 1–${IMG_COUNT}`, false, (folded) => {
+        body.style.display = folded ? "none" : "flex";
+    });
+    node.__mkH3M.sections.image = {
+        header: hdr.header, body, meta: hdr.meta, label: hdr.label, arrow: hdr.arrow,
+    };
+    return { header: hdr.header, body };
 }
 
 // 工作流载入后 properties 才反序列化 → 再按存下来的折叠状态重应用一遍
@@ -1698,11 +1752,20 @@ function applyFoldedState(node) {
         const sec = st.sections[kind];
         if (!sec || typeof m[kind] !== "boolean") continue;
         const folded = m[kind];
-        sec.body.style.display = folded ? "none" : "grid";
+        // 参考图那组装的是三个小折叠块（flex 纵向排列），不是格子网格
+        sec.body.style.display = folded ? "none" : (kind === "image" ? "flex" : "grid");
         if (sec.arrow) sec.arrow.textContent = folded ? "▶" : "▼";
     }
+    // 参考图的三档（1–3 / 4–6 / 7–9）
+    (st.rows || []).forEach((row, i) => {
+        const key = `image_row${i + 1}`;
+        if (typeof m[key] !== "boolean") return;
+        row.body.style.display = m[key] ? "none" : "grid";
+        if (row.arrow) row.arrow.textContent = m[key] ? "▶" : "▼";
+    });
     setTimeout(() => {
-        try { st.fitPanelHeight?.(true); } catch (_) {}
+        // 只增不减：工作流里存的尺寸就是用户最后拖出来的尺寸，重新贴合不能把它压回去
+        try { st.fitPanelHeight?.(false); } catch (_) {}
     }, 30);
 }
 
@@ -1714,6 +1777,17 @@ function updateSectionMeta(node, kind) {
     const list = settings[`${kind}s`] || [];
     const loaded = list.filter((it) => it.path);
     const enabled = loaded.filter((it) => it.enabled).length;
+
+    // 参考图的三档各显示自己的 x/3
+    if (kind === "image") {
+        (node.__mkH3M?.rows || []).forEach((row) => {
+            const slice = list.slice(row.start, row.start + 3);
+            const n = slice.filter((it) => it.path).length;
+            row.meta.textContent = n ? `${n}/3` : "";
+            row.meta.style.color = n ? "var(--mk-h3m-ok)" : "var(--mk-h3m-text-dim)";
+        });
+    }
+
     if (!loaded.length) {
         sec.meta.textContent = "";
         sec.meta.style.color = "var(--mk-h3m-text-dim)";
@@ -1746,9 +1820,8 @@ function buildPanel(node) {
     node.__mkH3M.status = status;
     container.appendChild(head);
 
-    // 参考图：默认展开
-    const imgSec = buildSection(node, "image", `🖼️ 参考图 1–${IMG_COUNT}`,
-                                IMG_COUNT, "1 / 1", false);
+    // 参考图：默认展开；内部再分三档（1–3 / 4–6 / 7–9）各自可折叠
+    const imgSec = buildImageSection(node);
     container.appendChild(imgSec.header);
     container.appendChild(imgSec.body);
 
@@ -1777,6 +1850,14 @@ function setupMediaLoader(node) {
         cells: { image: [], audio: [], video: [] },
         sections: { image: null, audio: null, video: null },   // 折叠头（含已载入提示）
         status: null,
+        // 是否由「载入工作流」配置而来：置 true 后所有自动贴合都只增不减，
+        // 免得切走再切回来时把用户手动拖出来的尺寸顶回去
+        configured: false,
+        // 还原工作流尺寸的那一小段时间：期间的 onResize 不做自动贴合，避免把尺寸顶回内容高度
+        configuring: false,
+        configureTimer: null,
+        // 用户手动能把节点拖到的最低高度：默认 MIN_NODE_H，主动折叠分组后随内容下调
+        floorH: MIN_NODE_H,
     };
 
     // 隐藏内部 JSON widget（存储用，不给用户看）
@@ -1799,32 +1880,37 @@ function setupMediaLoader(node) {
         try { delete dom.computeSize; } catch (_) { dom.computeSize = undefined; }
         dom.options = dom.options || {};
         dom.options.serialize = false;
-        // 最小高度只留「三个分组标题」的余量：实际高度由 fitPanelHeight 精确贴合内容，
-        // 折叠后能一直缩到只剩标题行（给 900 会永远在底部留一截空白）
-        dom.options.getMinHeight = () => 220;
+        // 面板下沿 = 节点下沿：widget 只保证绝对下限，真正的下限由 clampSize 里的 floorH 管
+        dom.options.getMinHeight = () => HARD_MIN_H;
         dom.options.getHeight = () => "100%";
-        dom.computeLayoutSize = () => ({ minHeight: 220, maxHeight: undefined, minWidth: 640 });
+        dom.computeLayoutSize = () => ({ minHeight: HARD_MIN_H, maxHeight: undefined });
     }
     node.__mkH3M.dom = dom;
 
-    // 最小宽度锁定：3 列正方形格子挤到 640 以下就没法看了
-    const lockWidth = () => {
+    // 固定最小尺寸（宽高都锁）：拖到比下限更小会被夹回来，只能往上拉。
+    // floorH 是"用户能拖到多矮"的下限：默认 MIN_NODE_H，主动折叠分组后可以一起下调
+    // （否则折叠完全没意义——收起来以后底部留一大片空白）。
+    const clampSize = () => {
         try {
             const w = Number(node.size?.[0]);
-            if (Number.isFinite(w) && w < 640) {
-                node.setSize?.([640, Math.max(node.size?.[1] || 780, 220)]);
+            const h = Number(node.size?.[1]);
+            if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+            const floorH = Number(node.__mkH3M?.floorH) || MIN_NODE_H;
+            if (w < MIN_NODE_W || h < floorH) {
+                node.setSize?.([Math.max(w, MIN_NODE_W), Math.max(h, floorH)]);
             }
         } catch (_) {}
     };
-    node.min_width = 640;
-    node.minWidth = 640;
+    node.min_width = MIN_NODE_W;
+    node.minWidth = MIN_NODE_W;
+    // 高度只报绝对下限；「用户能拖到多矮」由 clampSize 里的 floorH 决定（折叠后会下调）
+    node.min_height = HARD_MIN_H;
+    node.minHeight = HARD_MIN_H;
+    node.__mkH3M.clampSize = clampSize;
 
-    const syncWidth = () => {
-        try {
-            const fullW = Number.isFinite(node.size?.[0]) ? node.size[0] : 0;
-            if (dom && fullW && dom.width !== fullW) dom.width = fullW;
-        } catch (_) {}
-    };
+    // 面板宽度交给 CSS（width:100%）跟着节点走：这里绝不能再写 dom.width。
+    // 它是 CSS 像素，而节点尺寸是画布单位，两者差一个画布缩放系数（85% 时 = 1/0.85），
+    // 一旦写上，前端重新布局时会按 DOM 实际宽度反推节点宽度 → 节点被放大 1/缩放倍。
 
     // 面板不留滚动条：内容多高，节点就多高。
     // 宽度变化时精确贴合（可增可减）；只拖高度时只增不减，避免和用户拖拽打架。
@@ -1870,9 +1956,15 @@ function setupMediaLoader(node) {
             const delta = need - clientH;
             const shouldResize = fitAllowShrink ? Math.abs(delta) > 2 : delta > 2;
             if (shouldResize) {
+                // 收缩（只发生在主动折叠时）可以低于 MIN_NODE_H，但不能低于 HARD_MIN_H；
+                // 收完之后把这个高度记成新的拖拽下限，避免下次 onResize 又把它顶回 800
+                const target = Math.max(HARD_MIN_H, Math.round(cur + delta));
+                if (delta < -2 && target < (Number(node.__mkH3M?.floorH) || MIN_NODE_H)) {
+                    node.__mkH3M.floorH = target;
+                }
                 // 自己改的尺寸不要再回头量一次（改完布局还没生效，会越量越大）
                 selfResizing = true;
-                node.setSize?.([node.size?.[0] || 700, Math.max(220, cur + delta)]);
+                node.setSize?.([node.size?.[0] || MIN_NODE_W, target]);
                 setTimeout(() => { selfResizing = false; }, 120);
                 // 复核一次：aspect-ratio 取整可能让真实内容比预算多几像素，按实测差值补齐（只补一次，不会循环）
                 clearTimeout(verifyTimer);
@@ -1899,10 +1991,14 @@ function setupMediaLoader(node) {
     const prevResize = node.onResize;
     node.onResize = function (...args) {
         const r = prevResize?.apply(this, args);
-        syncWidth();
-        lockWidth();
         if (selfResizing) return r;   // 自己触发的尺寸变化，不重新量
         const w = Number(node.size?.[0]) || 0;
+        // 还在还原工作流尺寸：这时的尺寸变化是载入带来的，既不该夹下限也不该触发贴合
+        if (node.__mkH3M?.configuring) {
+            lastWidth = w;
+            return r;
+        }
+        clampSize();
         const widthChanged = Math.abs(w - lastWidth) > 0.5;
         lastWidth = w;
         // 宽度变了 → 格子尺寸变了 → 高度精确贴合；否则只保证不被裁切
@@ -1910,27 +2006,32 @@ function setupMediaLoader(node) {
         return r;
     };
     // 首次真正被绘制时（标签页切回来 / 后台加载的工作流）再贴合一次：
-    // 之前 clientHeight 可能是 0，量不到内容高度
+    // 之前 clientHeight 可能是 0，量不到内容高度。
+    // 已经由工作流配置过尺寸的节点**只增不减**，否则用户手动拖的尺寸会被顶回去。
     if (dom) {
         let firstDrawn = false;
         dom.options.onDraw = () => {
             if (firstDrawn || container.clientHeight <= 0) return;
             firstDrawn = true;
-            scheduleFit(true);
+            scheduleFit(!node.__mkH3M?.configured);
         };
     }
 
-    // 首次布局：按「音频 / 视频默认折叠」给个接近真实内容的初始高度，随后再精确贴合
-    lockWidth();
-    syncWidth();
-    if (!Number.isFinite(node.size?.[1]) || node.size[1] < 700) {
-        try { node.setSize?.([node.size?.[0] || 700, 800]); } catch (_) {}
+    // 首次布局：给个等于最小尺寸的初始大小，随后再按需长高
+    clampSize();
+    if (!Number.isFinite(node.size?.[1]) || node.size[1] < MIN_NODE_H
+        || !Number.isFinite(node.size?.[0]) || node.size[0] < MIN_NODE_W) {
+        try {
+            node.setSize?.([Math.max(Number(node.size?.[0]) || 0, MIN_NODE_W),
+                            Math.max(Number(node.size?.[1]) || 0, MIN_NODE_H)]);
+        } catch (_) {}
     }
     renderAllSlots(node);
     lastWidth = Number(node.size?.[0]) || 0;
-    requestAnimationFrame(syncWidth);
-    setTimeout(() => { syncWidth(); lockWidth(); scheduleFit(false); }, 60);
-    setTimeout(() => scheduleFit(true), 320);
+    setTimeout(() => { clampSize(); scheduleFit(false); }, 60);
+    // 新建的节点允许向下贴合（内容比 800 矮时也不会低于最小尺寸）；
+    // 从工作流载入的节点只增不减，保住用户拖出来的尺寸
+    setTimeout(() => scheduleFit(!node.__mkH3M?.configured), 320);
 
     // 执行回传：显示实际载入数量（后端 ui.media_info）
     const prevExecuted = node.onExecuted;
@@ -1990,6 +2091,22 @@ app.registerExtension({
         nodeType.prototype.onConfigure = function (info) {
             const r = onConfigure?.apply(this, arguments);
             const self = this;
+            // 有了存下来的尺寸，后续自动贴合一律只增不减（见 setupMediaLoader 里的 configured）
+            try {
+                if (self.__mkH3M) {
+                    self.__mkH3M.configured = true;
+                    self.__mkH3M.configuring = true;
+                    // 工作流里可能存着"折叠过、比 800 矮"的尺寸：把下限对齐到它，别一载入就顶回 800
+                    self.__mkH3M.floorH = Math.min(
+                        MIN_NODE_H, Math.round(Number(self.size?.[1]) || MIN_NODE_H));
+                    clearTimeout(self.__mkH3M.configureTimer);
+                    self.__mkH3M.configureTimer = setTimeout(() => {
+                        if (!self.__mkH3M) return;
+                        self.__mkH3M.configuring = false;
+                        try { self.__mkH3M.clampSize?.(); } catch (_) {}
+                    }, 500);
+                }
+            } catch (_) {}
             [0, 120, 400].forEach((ms) => setTimeout(() => {
                 try { refreshFromWidget(self); } catch (_) {}
                 try { applyFoldedState(self); } catch (_) {}
