@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "total": 8763,
+  "group": {
+    "id": "portrait",
+    "name": "写真图片"
+  },
+  "cats": [
+    {
+      "id": "mengmei",
+      "name": "萌妹",
+      "count": 300,
+      "file": "cat_mengmei.json"
+    },
+    {
+      "id": "bedroom",
+      "name": "卧室",
+      "count": 1180,
+      "file": "cat_bedroom.json"
+    },
+    {
+      "id": "bath",
+      "name": "浴室",
+      "count": 517,
+      "file": "cat_bath.json"
+    },
+    {
+      "id": "living",
+      "name": "客厅·沙发",
+      "count": 1571,
+      "file": "cat_living.json"
+    },
+    {
+      "id": "studio",
+      "name": "影棚·纯色",
+      "count": 900,
+      "file": "cat_studio.json"
+    },
+    {
+      "id": "pool",
+      "name": "泳池·海边",
+      "count": 628,
+      "file": "cat_pool.json"
+    },
+    {
+      "id": "street",
+      "name": "城市·街拍",
+      "count": 737,
+      "file": "cat_street.json"
+    },
+    {
+      "id": "nature",
+      "name": "自然·公园",
+      "count": 724,
+      "file": "cat_nature.json"
+    },
+    {
+      "id": "car",
+      "name": "车内",
+      "count": 599,
+      "file": "cat_car.json"
+    },
+    {
+      "id": "indoor",
+      "name": "室内其他",
+      "count": 1397,
+      "file": "cat_indoor.json"
+    },
+    {
+      "id": "other",
+      "name": "综合其他",
+      "count": 210,
+      "file": "cat_other.json"
+    }
+  ]
+}
