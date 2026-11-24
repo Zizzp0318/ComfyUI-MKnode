@@ -176,5 +176,51 @@
         "tooltip": "夹在区间内的最长边像素数，可直接接缩放节点的宽/高、或「按最长边缩放」的目标尺寸。"
       }
     }
+  },
+  "MK_MinimaxH3MediaLoader": {
+    "display_name": "MK-MiniMax H3素材加载",
+    "description": "9 张参考图 + 3 段参考视频（含原声）+ 3 段参考音频收进一个面板：每格带编号与开关，图片可按总像素等比缩放（可选缩放方式）或原图直出，音频在波形图上框选裁剪区间并试听，视频可设强制帧率 / 跳过帧数 / 输出宽高 / 帧数上限。执行后打包成一条 ref2va 参考总线，接到「MK-MiniMax H3素材解包」即可拆出 18 个素材口。",
+    "inputs": {
+      "media_settings": {
+        "name": "素材配置",
+        "tooltip": "由节点面板自动维护的 JSON（9 图 / 3 音频 / 3 视频的路径、开关与参数），随工作流保存，一般不用手改。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "ref2va参考总线",
+        "tooltip": "19 个槽位打包成的一条总线，接到「MK-MiniMax H3素材解包」的输入口。"
+      }
+    }
+  },
+  "MK_MinimaxH3MediaUnpack": {
+    "display_name": "MK-MiniMax H3素材解包",
+    "description": "把「MK-MiniMax H3素材加载」打的总线拆回 18 个素材口，口名与「MK-Minimax H3多参考生视频」的输入口逐字一致，一根线一个口直连。",
+    "inputs": {
+      "bus": {
+        "name": "ref2va参考总线",
+        "tooltip": "接「MK-MiniMax H3素材加载」的 ref2va参考总线输出。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "参考图 1", "tooltip": "第 1 张参考图，提示词里写 <Picture 1>" },
+      "1": { "name": "参考图 2", "tooltip": "第 2 张参考图，提示词里写 <Picture 2>" },
+      "2": { "name": "参考图 3", "tooltip": "第 3 张参考图，提示词里写 <Picture 3>" },
+      "3": { "name": "参考图 4", "tooltip": "第 4 张参考图，提示词里写 <Picture 4>" },
+      "4": { "name": "参考图 5", "tooltip": "第 5 张参考图，提示词里写 <Picture 5>" },
+      "5": { "name": "参考图 6", "tooltip": "第 6 张参考图，提示词里写 <Picture 6>" },
+      "6": { "name": "参考图 7", "tooltip": "第 7 张参考图，提示词里写 <Picture 7>" },
+      "7": { "name": "参考图 8", "tooltip": "第 8 张参考图，提示词里写 <Picture 8>" },
+      "8": { "name": "参考图 9", "tooltip": "第 9 张参考图，提示词里写 <Picture 9>" },
+      "9": { "name": "参考视频 1", "tooltip": "第 1 段参考视频的画面帧，提示词里写 <Video 1>" },
+      "10": { "name": "参考视频 2", "tooltip": "第 2 段参考视频的画面帧，提示词里写 <Video 2>" },
+      "11": { "name": "参考视频 3", "tooltip": "第 3 段参考视频的画面帧，提示词里写 <Video 3>" },
+      "12": { "name": "参考视频音频 1", "tooltip": "第 1 段参考视频的原声，接参考生视频节点的同号输入" },
+      "13": { "name": "参考视频音频 2", "tooltip": "第 2 段参考视频的原声，接参考生视频节点的同号输入" },
+      "14": { "name": "参考视频音频 3", "tooltip": "第 3 段参考视频的原声，接参考生视频节点的同号输入" },
+      "15": { "name": "参考音频 1", "tooltip": "第 1 段独立参考音频，提示词里写 <Audio 1>" },
+      "16": { "name": "参考音频 2", "tooltip": "第 2 段独立参考音频，提示词里写 <Audio 2>" },
+      "17": { "name": "参考音频 3", "tooltip": "第 3 段独立参考音频，提示词里写 <Audio 3>" }
+    }
   }
 }

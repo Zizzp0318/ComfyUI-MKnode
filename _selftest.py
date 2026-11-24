@@ -1365,6 +1365,181 @@ if _ms_loc:
           f"{_ms_loc.get('display_name')!r}")
 
 
+print("=== 21. MiniMax H3 素材加载 / 解包（MK_MinimaxH3MediaLoader / MK_MinimaxH3MediaUnpack）===")
+_h3m = pkg.NODE_CLASS_MAPPINGS.get("MK_MinimaxH3MediaLoader")
+_h3u = pkg.NODE_CLASS_MAPPINGS.get("MK_MinimaxH3MediaUnpack")
+_h3m_mod = sys.modules.get("Comfyui_MKnode.nodes.minimax_h3_media_loader")
+check("  加载节点已注册", _h3m is not None)
+check("  解包节点已注册", _h3u is not None)
+check("  加载节点显示名", pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaLoader")
+      == "MK-MiniMax H3素材加载", str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaLoader")))
+check("  解包节点显示名", pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaUnpack")
+      == "MK-MiniMax H3素材解包", str(pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_MinimaxH3MediaUnpack")))
+check("  两个节点都在 MK节点 分类",
+      getattr(_h3m, "CATEGORY", "") == "MK节点" and getattr(_h3u, "CATEGORY", "") == "MK节点")
+
+_h3_bus = getattr(_h3m_mod, "BUS_TYPE", "")
+check("  总线类型为 MK_REF2VA_BUS", _h3_bus == "MK_REF2VA_BUS", _h3_bus)
+check("  加载节点输入只有 media_settings",
+      list(_h3m.INPUT_TYPES()["required"]) == ["media_settings"],
+      str(list(_h3m.INPUT_TYPES()["required"])))
+check("  加载节点只输出一条总线",
+      _h3m.RETURN_TYPES == (_h3_bus,) and _h3m.RETURN_NAMES == ("ref2va参考总线",),
+      f"{_h3m.RETURN_TYPES} / {_h3m.RETURN_NAMES}")
+
+check("  解包节点输入是一条总线", list(_h3u.INPUT_TYPES()["required"]) == ["bus"],
+      str(list(_h3u.INPUT_TYPES()["required"])))
+check("  解包节点输入类型为总线类型",
+      _h3u.INPUT_TYPES()["required"]["bus"][0] == _h3_bus,
+      str(_h3u.INPUT_TYPES()["required"]["bus"][0]))
+check("  解包节点输出 18 个（12 IMAGE + 6 AUDIO）",
+      len(_h3u.RETURN_TYPES) == 18 and _h3u.RETURN_TYPES.count("IMAGE") == 12
+      and _h3u.RETURN_TYPES.count("AUDIO") == 6, str(_h3u.RETURN_TYPES))
+
+# 解包口名必须与「MK-Minimax H3多参考生视频」的输入口逐字一致，否则接不上
+_h3v_schema = pkg.NODE_CLASS_MAPPINGS["MK_MinimaxH3ReferenceToVideo"].GET_SCHEMA()
+_h3v_inputs = [i.id for i in _h3v_schema.inputs
+               if i.id.startswith("ref_") and i.id != "ref_image_size"]
+check("  解包输出口名与参考生视频的输入口逐字一致", list(_h3u.RETURN_NAMES) == _h3v_inputs,
+      str([x for x in _h3u.RETURN_NAMES if x not in _h3v_inputs]))
+check("  解包口顺序：图1-9 → 视频1-3 → 视频音频1-3 → 音频1-3",
+      list(_h3u.RETURN_NAMES[:3]) == ["ref_image_1", "ref_image_2", "ref_image_3"]
+      and _h3u.RETURN_NAMES[9] == "ref_video_1"
+      and _h3u.RETURN_NAMES[12] == "ref_video_audio_1"
+      and _h3u.RETURN_NAMES[15] == "ref_audio_1", str(_h3u.RETURN_NAMES[:3]))
+
+_h3m_node = _h3m()
+_h3m_empty = _h3m_node.load("")
+_h3m_bus_val = _h3m_empty.get("result", (None,))[0] if _h3m_empty.get("result") else None
+check("  空配置 -> result 是一条总线", isinstance(_h3m_bus_val, dict), str(type(_h3m_bus_val)))
+check("  总线 18 个键且全为 None",
+      isinstance(_h3m_bus_val, dict) and len(_h3m_bus_val) == 18
+      and all(v is None for v in _h3m_bus_val.values()),
+      str(None if not isinstance(_h3m_bus_val, dict) else len(_h3m_bus_val)))
+check("  总线键名与解包口一致", isinstance(_h3m_bus_val, dict)
+      and set(_h3m_bus_val) == set(_h3u.RETURN_NAMES),
+      str(None if not isinstance(_h3m_bus_val, dict)
+          else set(_h3m_bus_val) ^ set(_h3u.RETURN_NAMES)))
+
+_h3u_node = _h3u()
+_h3u_out = _h3u_node.unpack(_h3m_bus_val)
+check("  解包 -> 18 元组", isinstance(_h3u_out, tuple) and len(_h3u_out) == 18, str(type(_h3u_out)))
+check("  解包全 None（空总线）", all(v is None for v in _h3u_out))
+# 打包 -> 解包 往返：顺序不能错位
+_h3_fake = {k: f"V{i:02d}" for i, k in enumerate(_h3u.RETURN_NAMES)}
+check("  打包 → 解包 顺序不错位",
+      _h3u_node.unpack(_h3_fake) == tuple(f"V{i:02d}" for i in range(18)),
+      str(_h3u_node.unpack(_h3_fake)[:3]))
+check("  解包 None 不崩（全 None）", all(v is None for v in _h3u_node.unpack(None)))
+check("  解包脏数据不崩（字符串）", len(_h3u_node.unpack("not-a-dict")) == 18)
+
+_h3m_dirty = _h3m_node.load('{"images": "not-a-list", "videos": [null, 1, "x"]}')
+check("  脏配置不崩 -> 仍是总线", isinstance(_h3m_dirty.get("result", (None,))[0], dict))
+_h3m_miss = _h3m_node.load('{"images": [{"path": "一定不存在.png", "enabled": true}]}')
+check("  文件丢失写进 media_errors", len(_h3m_miss["ui"]["media_errors"][0]) >= 1,
+      str(_h3m_miss["ui"]["media_errors"]))
+check("  ui.media_info 有摘要", isinstance(_h3m_miss["ui"]["media_info"][0], str))
+check("  IS_CHANGED 带固定前缀",
+      str(_h3m.IS_CHANGED("")).startswith("mk_h3_media|"), str(_h3m.IS_CHANGED(""))[:24])
+
+# 图片槽位：只剩「禁用 / 按总像素」两项设置（纯函数，不写文件）
+_h3img = sys.modules["Comfyui_MKnode.nodes.minimax_h3_media_loader"]
+_h3img_def = _h3img.parse_settings("")["images"][0]
+check("  图片设置默认：禁用 + 目标 1.00MP",
+      (_h3img_def["scale_mode"], _h3img_def["target_megapixels"]) == ("off", 1.0),
+      str({k: _h3img_def[k] for k in ("scale_mode", "target_megapixels")}))
+check("  图片槽位只剩 5 个键（最长边 / 对齐 / 裁剪位置已移除）",
+      set(_h3img_def) == {"path", "enabled", "scale_mode", "target_megapixels", "scale_method"},
+      str(sorted(_h3img_def)))
+check("  缩放模式只剩 off / megapixels",
+      tuple(_h3img.IMAGE_SCALE_MODES) == ("off", "megapixels"),
+      str(_h3img.IMAGE_SCALE_MODES))
+check("  缩放方式 5 种，与 ComfyUI 的 upscale_method 同名同序",
+      tuple(_h3img.SCALE_METHODS) == ("nearest-exact", "bilinear", "area", "bicubic", "lanczos"),
+      str(_h3img.SCALE_METHODS))
+check("  默认缩放方式 = lanczos",
+      _h3img_def["scale_method"] == "lanczos", _h3img_def["scale_method"])
+check("  5 种方式都能映射到 PIL 滤镜",
+      all(isinstance(_h3img._resample_of(m), int) for m in _h3img.SCALE_METHODS),
+      {m: _h3img._resample_of(m) for m in _h3img.SCALE_METHODS})
+check("  非法缩放方式回落 lanczos",
+      _h3img.parse_settings({"images": [{"scale_method": "乱写"}]})["images"][0]["scale_method"]
+      == "lanczos")
+_h3img_bad = _h3img.parse_settings({"images": [{
+    "scale_mode": "乱写", "target_megapixels": 999, "target_longest_edge": 99999,
+    "crop_position": "火星", "align": 0, "crop_ratio": "1:1"}]})["images"][0]
+check("  脏数据回落（mode→off、MP→64、旧字段全部丢弃）",
+      (_h3img_bad["scale_mode"], _h3img_bad["target_megapixels"]) == ("off", 64.0)
+      and set(_h3img_bad) == {"path", "enabled", "scale_mode", "target_megapixels", "scale_method"},
+      str(_h3img_bad))
+check("  旧「按最长边」模式回落 off",
+      _h3img.parse_settings({"images": [{"scale_mode": "longest_edge"}]})["images"][0]["scale_mode"]
+      == "off")
+check("  目标尺寸：1.00MP -> 1000x800 变 1118x894",
+      _h3img._target_size(1000, 800, 1.0)[:2] == (1118, 894),
+      str(_h3img._target_size(1000, 800, 1.0)))
+check("  目标尺寸：4.00MP -> 1000x800 变 2236x1789",
+      _h3img._target_size(1000, 800, 4.0)[:2] == (2236, 1789),
+      str(_h3img._target_size(1000, 800, 4.0)))
+check("  目标 = 原面积时不动（0.8MP）",
+      _h3img._target_size(1000, 800, 0.8)[:2] == (1000, 800),
+      str(_h3img._target_size(1000, 800, 0.8)))
+check("  比例保持：3000x1000 缩到 1MP -> 1732x577",
+      _h3img._target_size(3000, 1000, 1.0)[:2] == (1732, 577),
+      str(_h3img._target_size(3000, 1000, 1.0)))
+check("  目标过大：被上限压回且 capped=True",
+      _h3img._target_size(2000, 1000, 64.0)[2] is True
+      and max(_h3img._target_size(2000, 1000, 64.0)[:2]) <= _h3img.MAX_IMAGE_EDGE,
+      str(_h3img._target_size(2000, 1000, 64.0)))
+check("  裁边 / 对齐相关实现已彻底移除",
+      not any(hasattr(_h3img, n) for n in
+              ("_trim_box", "_align_up", "_crop_box", "CROP_POSITIONS")))
+
+_h3s = sys.modules.get("Comfyui_MKnode.mk_h3_media_store")
+check("  /mk_h3 存储模块随包加载", _h3s is not None)
+if _h3s:
+    check("  上传 / 预览 5 个端点齐全",
+          all(callable(getattr(_h3s, n, None)) for n in
+              ("post_upload", "get_asset_preview", "get_audio_preview",
+               "get_video_preview", "get_asset_video_thumb")))
+    check("  上传落点 input/MKnode/h3", _h3s.SUBDIR == ("MKnode", "h3"), str(_h3s.SUBDIR))
+    check("  扩展名白名单覆盖三类",
+          set(_h3s.EXT_ALLOW) == {"image", "video", "audio"}, str(sorted(_h3s.EXT_ALLOW)))
+    check("  文件名清洗：乱码中文可还原",
+          _h3s._clean_upload_name("照片.png".encode("utf-8").decode("latin-1")) == "照片.png")
+    # 音频波形（音频裁剪面板用）
+    check("  音频波形端点已注册", callable(getattr(_h3s, "get_audio_waveform", None)))
+    check("  波形解码函数可用", callable(getattr(_h3s, "decode_waveform", None)))
+    check("  波形桶数常量：默认 600 / 下限 100 / 上限 2000",
+          (_h3s.WAVE_BUCKETS_DEFAULT, _h3s.WAVE_BUCKETS_MIN, _h3s.WAVE_BUCKETS_MAX)
+          == (600, 100, 2000),
+          str((_h3s.WAVE_BUCKETS_DEFAULT, _h3s.WAVE_BUCKETS_MIN, _h3s.WAVE_BUCKETS_MAX)))
+    check("  _resample_bins 输出 2×桶数",
+          len(_h3s._resample_bins([(0.0, 1.0)] * 50, 20)) == 40,
+          str(len(_h3s._resample_bins([(0.0, 1.0)] * 50, 20))))
+    check("  _resample_bins 空输入返回全零（不崩）",
+          set(_h3s._resample_bins([], 10)) == {0.0}, str(set(_h3s._resample_bins([], 10))))
+
+_h3m_loc = loc_all.get("MK_MinimaxH3MediaLoader")
+_h3u_loc = loc_all.get("MK_MinimaxH3MediaUnpack")
+check("  语言包含加载节点", _h3m_loc is not None)
+check("  语言包含解包节点", _h3u_loc is not None)
+if _h3m_loc:
+    check("  加载节点 display_name 一致",
+          _h3m_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_MinimaxH3MediaLoader"],
+          f"{_h3m_loc.get('display_name')!r}")
+    check("  加载节点语言包输出 1 条", len(_h3m_loc.get("outputs", {})) == 1,
+          str(len(_h3m_loc.get("outputs", {}))))
+if _h3u_loc:
+    check("  解包节点 display_name 一致",
+          _h3u_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_MinimaxH3MediaUnpack"],
+          f"{_h3u_loc.get('display_name')!r}")
+    check("  解包节点语言包输出 18 条", len(_h3u_loc.get("outputs", {})) == 18,
+          str(len(_h3u_loc.get("outputs", {}))))
+    check("  解包节点语言包输入为 bus", set(_h3u_loc.get("inputs", {})) == {"bus"},
+          str(sorted(_h3u_loc.get("inputs", {}))))
+
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")

@@ -18,6 +18,7 @@ from .load_image import MKLoadImage
 from .image_merge_mask import MKImageMergeMask
 from .mask_crop import MKCropRestore, MKMaskCrop
 from .mask_is_empty import MKMaskIsEmpty
+from .minimax_h3_media_loader import MKMinimaxH3MediaLoader, MKMinimaxH3MediaUnpack
 from .minimax_h3_ref2video import MKMinimaxH3ReferenceToVideo
 from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
@@ -45,6 +46,8 @@ NODE_CLASSES = [
     MKMaskCrop,
     MKMaskIsEmpty,
     MKCropRestore,
+    MKMinimaxH3MediaLoader,
+    MKMinimaxH3MediaUnpack,
     MKMinimaxH3ReferenceToVideo,
     MKAdaptiveMegapixels,
     MKBgRemove,
@@ -74,6 +77,8 @@ __all__ = [
     "MKMaskCrop",
     "MKMaskIsEmpty",
     "MKCropRestore",
+    "MKMinimaxH3MediaLoader",
+    "MKMinimaxH3MediaUnpack",
     "MKMinimaxH3ReferenceToVideo",
     "MKAdaptiveMegapixels",
     "MKBgRemove",

@@ -6,7 +6,8 @@
         tree.json                 分类树（可嵌套，任意层）
         <分类 id>/items.json      该分类的素材条目 [{"f": 文件名, "p": 提示词, "t": 时间戳}]
         <分类 id>/0001.webp       素材图（上传后统一转 WebP，长边 320）
-        _trash/<id>-<时间>/        删除的分类挪到这里（软删除，随时能手动捞回）
+
+删除分类是真删除：`rmcat` 直接删掉分类目录（items.json + 全部素材图），不留副本。
 
 路由：
     GET  /mk_ppg/tree?                  -> {"cats": [...]}（每个节点带 count）
@@ -15,7 +16,7 @@
     POST /mk_ppg/items?cat=<id>         {"items": [...]}
     POST /mk_ppg/upload?cat=<id>        multipart: prompt + image(可选) -> {"item": {...}}
     POST /mk_ppg/move                   {"from","to","index"} 素材换分类（图片文件一起搬）
-    POST /mk_ppg/rmcat?cat=<id>         连目录一起挪进 _trash
+    POST /mk_ppg/rmcat?cat=<id>         真删除该分类目录（不可恢复）
     GET  /mk_ppg/asset?cat=<id>&f=<名>  素材图
 """
 
@@ -24,6 +25,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 
 from aiohttp import web
@@ -367,20 +369,22 @@ async def post_move(request):
 
 
 async def post_rmcat(request):
+    """真删除分类目录：items.json 与全部素材图一起删掉，不进回收站。"""
     cat = request.query.get("cat", "")
     if not CAT_ID_RE.match(cat):
         return _err("分类 id 非法")
     folder = cat_dir(cat)
     if not os.path.isdir(folder):
-        return _json({"ok": True})
-    trash = os.path.join(base_dir(), "_trash")
-    os.makedirs(trash, exist_ok=True)
-    target = os.path.join(trash, f"{cat}-{int(time.time())}")
+        return _json({"ok": True, "removed": False})
+    # 只允许删 base_dir 正下方的那一级目录，防止任何路径拼接意外删到别处
+    root = os.path.abspath(base_dir())
+    if os.path.dirname(os.path.abspath(folder)) != root:
+        return _err("分类路径越界", 403)
     try:
-        os.replace(folder, target)     # 软删除：挪走而不是删掉
-        return _json({"ok": True, "moved_to": os.path.basename(target)})
+        shutil.rmtree(folder)
+        return _json({"ok": True, "removed": True})
     except Exception as exc:
-        logging.exception("[MK] 移走分类目录失败")
+        logging.exception("[MK] 删除分类目录失败")
         return _err(f"删除分类失败：{exc}", 500)
 
 

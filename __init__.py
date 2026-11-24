@@ -23,6 +23,8 @@ from .nodes import (
     MKCropRestore,
     MKMaskCrop,
     MKMaskIsEmpty,
+    MKMinimaxH3MediaLoader,
+    MKMinimaxH3MediaUnpack,
     MKMinimaxH3ReferenceToVideo,
     MKImageSelector,
     MKLoadImage,
@@ -40,7 +42,9 @@ from .nodes import (
 
 WEB_DIRECTORY = "./web"
 
-# 提示词预设图库的用户数据路由（/mk_ppg/*，落 user/default/MKnode/Prompt Preset），import 即注册
+# 提示词预设图库的用户数据路由（/mk_ppg/*，落 user/default/MKnode/Prompt Preset）与
+# 素材加载的上传/预览路由（/mk_h3/*，落 input/MKnode/h3/<kind>），import 即注册
+from . import mk_h3_media_store  # noqa: E402,F401
 from . import mk_ppg_store  # noqa: E402,F401
 
 NODE_CLASS_MAPPINGS = {
@@ -60,6 +64,8 @@ NODE_CLASS_MAPPINGS = {
     "MK_MaskCrop": MKMaskCrop,
     "MK_MaskIsEmpty": MKMaskIsEmpty,
     "MK_CropRestore": MKCropRestore,
+    "MK_MinimaxH3MediaLoader": MKMinimaxH3MediaLoader,
+    "MK_MinimaxH3MediaUnpack": MKMinimaxH3MediaUnpack,
     "MK_MinimaxH3ReferenceToVideo": MKMinimaxH3ReferenceToVideo,
     "MK_AdaptiveMegapixels": MKAdaptiveMegapixels,
     "MK_BgRemove": MKBgRemove,
@@ -89,6 +95,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_MaskCrop": "MK-遮罩裁剪",
     "MK_MaskIsEmpty": "MK-遮罩是否为空",
     "MK_CropRestore": "MK-裁剪恢复",
+    "MK_MinimaxH3MediaLoader": "MK-MiniMax H3素材加载",
+    "MK_MinimaxH3MediaUnpack": "MK-MiniMax H3素材解包",
     "MK_MinimaxH3ReferenceToVideo": "MK-Minimax H3多参考生视频",
     "MK_AdaptiveMegapixels": "MK-自适应百万像素",
     "MK_BgRemove": "MK-图片背景移除",
