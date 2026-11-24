@@ -1,7 +1,7 @@
 // Comfyui_MKnode —— MK-禁用（忽略）多组青春版 前端
 //
-// 与「老关怀版」（web/ignore_groups.js）是同一个功能的两种皮：
-// - 老关怀版：自绘 DOM 面板（行更高、字号更大），带「UI 组件大小」缩放，给眼睛吃力的场景用；
+// 与「老年关怀版」（web/ignore_groups.js）是同一个功能的两种皮：
+// - 老年关怀版：自绘 DOM 面板（行更高、字号更大），带「UI 组件大小」缩放，给眼睛吃力的场景用；
 // - 青春版（本文件）：全部用 ComfyUI **原生 widget** ——
 //     每个编组 = 一个原生开关（toggle），设置入口 = 一个原生按钮（不再是右上角的齿轮图标）；
 //   不提供放大/缩小设置，节点宽高就是 ComfyUI 的默认行为。
@@ -482,7 +482,7 @@ function buildYouthUI(node) {
     ensureGraphHooks(hostGraph());
 
 
-    // ── 设置弹窗（原生 UI 下没有缩放/主题色：那是老关怀版的东西） ──
+    // ── 设置弹窗（原生 UI 下没有缩放/主题色：那是老年关怀版的东西） ──
     let _settingsCleanup = null;
 
     function showSettings() {
@@ -499,9 +499,11 @@ function buildYouthUI(node) {
         const pop = document.createElement("div");
         pop.id = "mk_igy_pop";
         Object.assign(pop.style, {
+            // 位置由 placePopup() 按节点位置算，先藏起来量尺寸，避免闪到左上角
             position: "fixed",
-            left: Math.max(8, Math.round(innerWidth / 2 - 130)) + "px",
-            top: Math.max(8, Math.round(innerHeight / 2 - 260)) + "px",
+            left: "0px",
+            top: "0px",
+            visibility: "hidden",
             background: "#2a2a2a", border: "1px solid #555",
             borderRadius: "8px", padding: "14px 18px",
             zIndex: "99999", minWidth: "250px",
@@ -509,7 +511,10 @@ function buildYouthUI(node) {
             color: "#e0e0e0", fontFamily: "inherit",
         });
 
+        let _rafId = 0;
+
         function closePopup() {
+            if (_rafId) { cancelAnimationFrame(_rafId); _rafId = 0; }
             if (overlay.parentNode) overlay.remove();
             if (pop.parentNode) pop.remove();
             document.removeEventListener("keydown", onEsc);
@@ -795,6 +800,62 @@ function buildYouthUI(node) {
 
         document.body.appendChild(pop);
         pop.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); });
+
+        // ── 弹窗定位：始终贴在节点左侧（左边挤不下才翻到右侧），竖直与节点居中对齐 ──
+        // 画布平移 / 缩放 / 节点移动时用 rAF 跟随；尺寸只量一次，避免每帧强制重排。
+        const GAP = 12;   // 与节点之间的间距
+        const EDGE = 8;   // 距浏览器窗口边缘的最小留白
+        let _popW = 0, _popH = 0, _lastPos = "";
+
+        function nodeScreenRect() {
+            const canvasEl = app.canvas && app.canvas.canvas;
+            if (!canvasEl) return null;
+            const box = canvasEl.getBoundingClientRect();
+            const ds = app.canvas.ds;
+            const scale = (ds && ds.scale) || 1;
+            // 图坐标 -> 画布坐标（与 LGraphCanvas.convertOffsetToCanvas 同一套换算）
+            const p = ds && ds.convertOffsetToCanvas
+                ? ds.convertOffsetToCanvas([node.pos[0], node.pos[1]])
+                : [(node.pos[0] + (ds ? ds.offset[0] : 0)) * scale,
+                   (node.pos[1] + (ds ? ds.offset[1] : 0)) * scale];
+            const size = node.size || [280, 100];
+            return {
+                left: box.left + p[0],
+                top: box.top + p[1],
+                width: size[0] * scale,
+                height: size[1] * scale,
+            };
+        }
+
+        function placePopup() {
+            if (!pop.parentNode) return;
+            if (!_popW) { _popW = pop.offsetWidth; _popH = pop.offsetHeight; }
+            const rect = nodeScreenRect();
+            let left, top;
+            if (rect) {
+                left = rect.left - _popW - GAP;                        // 优先：节点左侧
+                if (left < EDGE) left = rect.left + rect.width + GAP;  // 左边放不下 → 节点右侧
+                top = rect.top + (rect.height - _popH) / 2;            // 竖直方向与节点居中
+            } else {
+                left = EDGE;
+                top = EDGE;
+            }
+            left = Math.min(Math.max(EDGE, left), Math.max(EDGE, innerWidth - _popW - EDGE));
+            top = Math.min(Math.max(EDGE, top), Math.max(EDGE, innerHeight - _popH - EDGE));
+            const key = Math.round(left) + "," + Math.round(top);
+            if (key !== _lastPos) {
+                _lastPos = key;
+                pop.style.left = Math.round(left) + "px";
+                pop.style.top = Math.round(top) + "px";
+            }
+            if (pop.style.visibility !== "visible") pop.style.visibility = "visible";
+        }
+
+        function trackPopup() {
+            placePopup();
+            _rafId = requestAnimationFrame(trackPopup);
+        }
+        trackPopup();
     }
 
     node._mkIgyShowSettings = showSettings;

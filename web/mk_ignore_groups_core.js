@@ -1,6 +1,6 @@
 // Comfyui_MKnode —— 「禁用（忽略）多组」两个版本共用的分组扫描逻辑
 //
-// MK-禁用（忽略）多组老关怀版（web/ignore_groups.js，自绘 DOM 面板）
+// MK-禁用（忽略）多组老年关怀版（web/ignore_groups.js，自绘 DOM 面板）
 // 与 MK-禁用（忽略）多组青春版（web/ignore_groups_youth.js，用 ComfyUI 原生 widget）
 // 只差在「怎么画」，分组怎么找、开关怎么落、状态怎么判，全在这里。
 //

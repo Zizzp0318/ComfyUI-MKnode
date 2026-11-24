@@ -24,14 +24,10 @@ from .nodes import (
     MKMaskCrop,
     MKMaskIsEmpty,
     MKMinimaxH3ReferenceToVideo,
-    MKFacePicker,
-    MKGarmentPicker,
     MKImageSelector,
-    MKPosePicker,
     MKLoadImage,
     MKLoraLoaderModelOnly,
     MKPromptConcat,
-    MKPromptLibrary,
     MKQwenImage21PromptEnhancer,
     MKVRAMCleanup,
     MKRAMCleanup,
@@ -43,12 +39,6 @@ from .nodes import (
 
 WEB_DIRECTORY = "./web"
 
-# 图库：注册 /mkposes /mkgarments /mkfaces 路由，并准备用户素材目录
-from . import gallery_api  # noqa: E402,F401
-from .mkg import bootstrap  # noqa: E402
-
-bootstrap.ensure_userdata()
-
 NODE_CLASS_MAPPINGS = {
     "MK_LoadImage": MKLoadImage,
     "MK_ImageSelector": MKImageSelector,
@@ -57,7 +47,6 @@ NODE_CLASS_MAPPINGS = {
     "MK_IgnoreGroups": MKIgnoreGroups,
     "MK_IgnoreGroupsYouth": MKIgnoreGroupsYouth,
     "MK_PromptConcat": MKPromptConcat,
-    "MK_PromptLibrary": MKPromptLibrary,
     "MK_QwenImage21PromptEnhancer": MKQwenImage21PromptEnhancer,
     "MK_VRAMCleanup": MKVRAMCleanup,
     "MK_RAMCleanup": MKRAMCleanup,
@@ -74,9 +63,6 @@ NODE_CLASS_MAPPINGS = {
     "MK_SaveImage": MKSaveImage,
     "MK_TiledUpscale": MKTiledUpscale,
     "MK_TiledUpscaleStitch": MKTiledUpscaleStitch,
-    "MKPosePicker": MKPosePicker,
-    "MKGarmentPicker": MKGarmentPicker,
-    "MKFacePicker": MKFacePicker,
     "MK_TextEncodeQwenImage21": MKTextEncodeQwenImage21,
 }
 
@@ -86,10 +72,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_ImageSelector": "MK-图像选择器",
     "MK_ImageCompare": "MK-图像对比",
     "MK_AnySwitch": "MK-任意切换",
-    "MK_IgnoreGroups": "MK-禁用（忽略）多组老关怀版",
+    "MK_IgnoreGroups": "MK-禁用（忽略）多组老年关怀版",
     "MK_IgnoreGroupsYouth": "MK-禁用（忽略）多组青春版",
     "MK_PromptConcat": "MK-提示词拼接",
-    "MK_PromptLibrary": "MK-提示词大全",
     "MK_QwenImage21PromptEnhancer": "MK-Qwen Image 2.1提示词增强",
     "MK_VRAMCleanup": "MK-显存清理",
     "MK_RAMCleanup": "MK-内存清理",
@@ -106,9 +91,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_SaveImage": "MK-图像保存",
     "MK_TiledUpscale": "MK-图像分块",
     "MK_TiledUpscaleStitch": "MK-分块合并",
-    "MKPosePicker": "MK-姿态库",
-    "MKGarmentPicker": "MK-服装库",
-    "MKFacePicker": "MK-脸模库",
     "MK_TextEncodeQwenImage21": "MK-Qwen Image 2.1文本编码器",
 }
 

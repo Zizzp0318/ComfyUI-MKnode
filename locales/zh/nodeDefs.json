@@ -43,22 +43,6 @@
       }
     }
   },
-  "MK_PromptLibrary": {
-    "display_name": "MK-提示词大全",
-    "description": "图片化提示词库：点击「提示词预设选择」，在缩略图网格中点选图片即可把对应提示词填入文本框；支持多级分类、上传配图（只存压缩缩略图）、编辑与移动。",
-    "inputs": {
-      "text": {
-        "name": "文本",
-        "tooltip": "最终输出的提示词文本，可从图片库点选一键填入。"
-      }
-    },
-    "outputs": {
-      "0": {
-        "name": "提示词",
-        "tooltip": "选中的提示词文本"
-      }
-    }
-  },
   "MK_ImageCompare": {
     "display_name": "MK-图像对比",
     "description": "把图像A与图像B叠在一起，拖动分割线对比差异；同时把图像A原样输出给下游。",
@@ -110,14 +94,14 @@
     }
   },
   "MK_IgnoreGroups": {
-    "display_name": "MK-禁用（忽略）多组老关怀版",
+    "display_name": "MK-禁用（忽略）多组老年关怀版",
     "description": "把所有编组列成一行行的自绘开关，一键把整组节点切到「启用 / 绕过 / 禁用」。行更高、字号更大，并支持「UI 组件大小」缩放与主题色；支持子图内的编组。",
     "inputs": {},
     "outputs": {}
   },
   "MK_IgnoreGroupsYouth": {
     "display_name": "MK-禁用（忽略）多组青春版",
-    "description": "与老关怀版功能相同，界面改用 ComfyUI 原生控件：每组一个原生开关，设置入口是一个按钮。不提供 UI 缩放与主题色，节点尺寸走默认行为；支持子图内的编组。",
+    "description": "与老年关怀版功能相同，界面改用 ComfyUI 原生控件：每组一个原生开关，设置入口是一个按钮。不提供 UI 缩放与主题色，节点尺寸走默认行为；支持子图内的编组。",
     "inputs": {},
     "outputs": {}
   },

@@ -869,21 +869,7 @@ if lo_loc:
           lo_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_LoraLoaderModelOnly"],
           f"{lo_loc.get('display_name')!r}")
 
-print("=== 15. 提示词大全：分类排序（前端契约）===")
-pl_js = _read("web/prompt_library.js")
-check("  有同级上移/下移实现", "function _libMoveNode(lib, id, direction)" in pl_js)
-check("  拖拽与按钮共用同一套编号规则", "function _libApplyCategoryOrder(list)" in pl_js)
-check("  拖拽落位按显示顺序重排", "_libApplyCategoryOrder(sorted)" in pl_js)
-check("  分类行有 ↑ / ↓ 按钮", 'up.textContent = "↑"' in pl_js and 'down.textContent = "↓"' in pl_js)
-check("  按钮挂在「非收藏」行上（收藏固定第一）",
-      "if (!isFav) {" in pl_js and "up.disabled = pos <= 0" in pl_js)
-check("  末位时下移按钮禁用", "down.disabled = pos < 0 || pos >= siblingsRest.length - 1" in pl_js)
-check("  上移/下移后存盘并重绘",
-      "await moveCategory(node, -1)" in pl_js and "await moveCategory(node, 1)" in pl_js)
-check("  有按钮样式（平时压暗 / hover 提亮）", ".mk-pl-tree-move" in pl_js)
-check("  分类下拉/移动目标按显示顺序遍历", "for (const node of _libSortNodes(nodes))" in pl_js)
-
-print("=== 16. 自适应百万像素（MK_AdaptiveMegapixels，V3）===")
+print("=== 15. 自适应百万像素（MK_AdaptiveMegapixels，V3）===")
 import torch as _torch  # noqa: E402
 from Comfyui_MKnode.nodes.adaptive_megapixels import (  # noqa: E402
     MKAdaptiveMegapixels,
@@ -964,7 +950,7 @@ if am_loc:
           am_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveMegapixels"],
           f"{am_loc.get('display_name')!r}")
 
-print("=== 17. 自适应最长边（MK_AdaptiveLongestEdge，V3）===")
+print("=== 16. 自适应最长边（MK_AdaptiveLongestEdge，V3）===")
 from Comfyui_MKnode.nodes.adaptive_longest_edge import (  # noqa: E402
     MKAdaptiveLongestEdge,
     longest_edge_of,
@@ -1040,7 +1026,7 @@ if le_loc:
           le_loc.get("display_name") == pkg.NODE_DISPLAY_NAME_MAPPINGS["MK_AdaptiveLongestEdge"],
           f"{le_loc.get('display_name')!r}")
 
-print("=== 18. 遮罩裁剪 / 裁剪恢复（MK_MaskCrop / MK_CropRestore，V1）===")
+print("=== 17. 遮罩裁剪 / 裁剪恢复（MK_MaskCrop / MK_CropRestore，V1）===")
 from Comfyui_MKnode.nodes.mask_crop import MKMaskCrop, MKCropRestore  # noqa: E402
 
 mc_it = MKMaskCrop.INPUT_TYPES()["required"]
@@ -1137,7 +1123,7 @@ except Exception as exc:  # noqa: BLE001
     _bg_bad = exc
 check("  背景图尺寸不符时报错", isinstance(_bg_bad, ValueError), type(_bg_bad).__name__)
 
-print("=== 19. 图像合并（遮罩）（MK_ImageMergeMask，V1）===")
+print("=== 18. 图像合并（遮罩）（MK_ImageMergeMask，V1）===")
 from Comfyui_MKnode.nodes.image_merge_mask import MKImageMergeMask  # noqa: E402
 
 mg_it = MKImageMergeMask.INPUT_TYPES()
@@ -1217,117 +1203,13 @@ check("  不拉伸 + 遮罩：遮罩内覆盖、外是背景",
       _torch.allclose(_mg_center2[0, 32, 32, :3], _torch.tensor(_BLUE), atol=0.02)
       and _torch.allclose(_mg_center2[0, 2, 2, :3], _torch.tensor(_RED), atol=0.02))
 
-print("=== 20. 图库（姿态库/服装库/脸模库，迁移自 MK_Gallery）===")
-import io
-import tempfile
-from pathlib import Path  # noqa: E402
-
-from Comfyui_MKnode.mkg import library, paths, store  # noqa: E402
-from Comfyui_MKnode.nodes.gallery import (  # noqa: E402
-    MKFacePicker,
-    MKGarmentPicker,
-    MKPosePicker,
-    _resolve_seed,
-)
-
-check("  三个节点已注册", all(k in pkg.NODE_CLASS_MAPPINGS for k in ("MKPosePicker", "MKGarmentPicker", "MKFacePicker")))
-check("  显示名正确",
-      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MKPosePicker") == "MK-姿态库"
-      and pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MKGarmentPicker") == "MK-服装库"
-      and pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MKFacePicker") == "MK-脸模库")
-check("  分类是 MK_Gallery", all(
-      cls.CATEGORY == "MK_Gallery" for cls in (MKPosePicker, MKGarmentPicker, MKFacePicker)))
-check("  输出 IMAGE", all(cls.RETURN_TYPES == ("IMAGE",) for cls in (MKPosePicker, MKGarmentPicker, MKFacePicker)))
-
-_it = MKPosePicker.INPUT_TYPES()["required"]
-print("  PosePicker 输入:", list(_it))
-check("  输入含 模式/姿态/分类/种子",
-      set(_it) == {"模式", "姿态", "分类", "种子"}, str(list(_it)))
-check("  模式下拉三选",
-      list(_it["模式"][0]) == ["固定选中", "全库随机", "范围内随机"], str(list(_it["模式"][0])))
-
-# 数据目录：默认应落在 user/Comfyui_MKnode/mk_gallery
-_root_str = str(paths.user_root())
-print("  图库数据目录:", _root_str)
-check("  数据目录已迁到 Comfyui_MKnode/mk_gallery",
-      _root_str.endswith("Comfyui_MKnode" + os.sep + "mk_gallery")
-      and "default" not in _root_str.split(os.sep), _root_str)
-
-# 前端契约
-import os as _os  # noqa: E402
-_wd = _os.path.join(os.path.dirname(pkg.__file__), "web")
-for _f in ("gallery-core.js", "mk-pose.js", "mk-face.js", "mk-garment.js"):
-    check(f"  前端文件存在 web/{_f}", _os.path.isfile(_os.path.join(_wd, _f)))
-_gc = open(_os.path.join(_wd, "gallery-core.js"), encoding="utf-8").read() if _os.path.isfile(_os.path.join(_wd, "gallery-core.js")) else ""
-check("  gallery-core 导出 defineGallery", "export function defineGallery" in _gc)
-check("  三个入口各自注册扩展", "MKPosePicker" in _gc or "MKPosePicker" in open(_os.path.join(_wd, "mk-pose.js"), encoding="utf-8").read())
-
-# v3.1：缩略图右上角 × 去掉（只保留右键删除）；取图方式/分类筛选由原生 select 换成自绘下拉
-check("  缩略图不再渲染 .gp-del 删除按钮", '"gp-del"' not in _gc and "gp-del" not in _gc)
-check("  无原生 select（取图方式/分类已自绘下拉）", "<select" not in _gc)
-check("  自绘下拉就位", all(k in _gc for k in ("gp-menu", "renderModeMenu", "renderCatSelMenu", "toggleMenu")))
-check("  版本标记更新到 mk-v3.1", 'const VERSION = "mk-v3.1"' in _gc)
-
-# IS_CHANGED：随机 + 种子 -1 要强制重跑（NaN），固定选中复用缓存
-check("  固定选中 IS_CHANGED 复用缓存", MKPosePicker.IS_CHANGED(模式="固定选中", 分类="全部", 种子=-1) == "")
-_nan_val = MKPosePicker.IS_CHANGED(模式="全库随机", 分类="全部", 种子=-1)
-check("  随机且种子 -1 时 IS_CHANGED 返回 NaN（每次重跑）", _nan_val != _nan_val, str(_nan_val))
-check("  固定种子 IS_CHANGED 可复现",
-      MKPosePicker.IS_CHANGED(模式="全库随机", 分类="全部", 种子=42) == "seed=42|全库随机|全部")
-
-# _resolve_seed
-_s1, _a1 = _resolve_seed(-1)
-check("  种子 -1 走系统熵", _a1 is True and 0 <= _s1 < 2 ** 31, f"{_s1}/{_a1}")
-_s2, _a2 = _resolve_seed(42)
-check("  种子 >=0 原样返回", _s2 == 42 and _a2 is False)
-_s3, _a3 = _resolve_seed("不是数字")
-check("  非数字种子按随机处理", _a3 is True)
-
-# ── 隔离的取图行为：临时目录里造一个库 ──
-_old_root = paths._root_cache
-_tmp = Path(tempfile.mkdtemp(prefix="mk_gallery_test_"))
-paths._root_cache = _tmp
-store._cache.clear()
-try:
-    paths.ensure_dirs("pose")
-    _buf = io.BytesIO()
-    Image.new("RGB", (64, 48), (200, 80, 40)).save(_buf, "PNG")
-    _saved, _failed = store.add_many("pose", [("姿态 01.png", _buf.getvalue())], name="站姿 01", cat="站姿")
-    check("  导入一张图成功", len(_saved) == 1 and not _failed, f"saved={_saved} failed={_failed}")
-
-    _idx = library.index("pose")
-    check("  索引 total=1 且分类登记", _idx["total"] == 1 and _idx["categories"][0]["name"] == "站姿",
-          f"{_idx['total']}/{_idx['categories']}")
-
-    _out = MKPosePicker().pick("固定选中", "站姿 01", "全部", -1)
-    check("  固定选中出图且尺寸正确", tuple(_out["result"][0].shape) == (1, 48, 64, 3),
-          str(tuple(_out["result"][0].shape)))
-    check("  回传 picked 信息", _out["ui"]["picked"][0]["name"] == "站姿 01")
-
-    _r1 = MKPosePicker().pick("全库随机", "", "全部", 42)
-    _r2 = MKPosePicker().pick("全库随机", "", "全部", 42)
-    check("  随机模式同种子可复现",
-          _r1["ui"]["picked"][0]["seed"] == 42 and _r1["ui"]["picked"][0]["name"] == _r2["ui"]["picked"][0]["name"])
-
-    # 空库 / 找不到 → 中文报错
-    from Comfyui_MKnode.mkg.errors import GalleryMissing  # noqa: E402
-    _err = None
-    try:
-        MKPosePicker().pick("固定选中", "不存在的姿态", "全部", -1)
-    except GalleryMissing as exc:
-        _err = str(exc)
-    check("  找不到时抛中文 GalleryMissing", _err is not None and "重新选" in _err, (_err or "")[:40])
-finally:
-    paths._root_cache = _old_root
-    store._cache.clear()
-
-print("=== 21. 禁用（忽略）多组（MK_IgnoreGroups，V1 纯 UI 节点）===")
+print("=== 19. 禁用（忽略）多组（MK_IgnoreGroups，V1 纯 UI 节点）===")
 from Comfyui_MKnode.nodes.ignore_groups import MKIgnoreGroups  # noqa: E402
 
 ig_it = MKIgnoreGroups.INPUT_TYPES()
 check("  已注册", "MK_IgnoreGroups" in pkg.NODE_CLASS_MAPPINGS)
-check("  显示名为 MK-禁用（忽略）多组老关怀版",
-      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups") == "MK-禁用（忽略）多组老关怀版",
+check("  显示名为 MK-禁用（忽略）多组老年关怀版",
+      pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups") == "MK-禁用（忽略）多组老年关怀版",
       pkg.NODE_DISPLAY_NAME_MAPPINGS.get("MK_IgnoreGroups"))
 check("  无输入", ig_it["required"] == {}, str(ig_it["required"]))
 check("  无输出（纯 UI 节点）", MKIgnoreGroups.RETURN_TYPES == (), str(MKIgnoreGroups.RETURN_TYPES))
@@ -1380,7 +1262,7 @@ check("  核心模块导出分组扫描与开关",
       all(k in core_js for k in ("export function buildEntries", "export function collectNodes",
                                  "export function getGroupState", "export function bypassGroup",
                                  "export function restoreGroup")), "缺少导出")
-check("  老关怀版改为引用核心模块",
+check("  老年关怀版改为引用核心模块",
       "mk_ignore_groups_core.js" in ig_js and "buildEntries" in ig_js)
 
 # 青春版：原生 widget
@@ -1432,7 +1314,7 @@ if you_loc:
           f"{you_loc.get('display_name')!r}")
 
 
-print("=== 22. 遮罩是否为空（MK_MaskIsEmpty，V3）===")
+print("=== 20. 遮罩是否为空（MK_MaskIsEmpty，V3）===")
 import torch as _torch  # noqa: E402
 
 from Comfyui_MKnode.nodes.mask_is_empty import MKMaskIsEmpty  # noqa: E402

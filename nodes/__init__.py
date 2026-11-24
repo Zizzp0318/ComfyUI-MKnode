@@ -10,7 +10,6 @@ from .adaptive_longest_edge import MKAdaptiveLongestEdge
 from .bg_remove import MKBgRemove
 from .adaptive_megapixels import MKAdaptiveMegapixels
 from .any_switch import MKAnySwitch
-from .gallery import MKFacePicker, MKGarmentPicker, MKPosePicker
 from .ignore_groups import MKIgnoreGroups, MKIgnoreGroupsYouth
 from .image_compare import MKImageCompare
 from .image_crop import MKImageCrop
@@ -22,9 +21,6 @@ from .mask_is_empty import MKMaskIsEmpty
 from .minimax_h3_ref2video import MKMinimaxH3ReferenceToVideo
 from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
-from .prompt_library import MKPromptLibrary
-# 存储路由（MK-提示词大全前端使用 /mk_prompt_store），import 即注册
-from . import prompt_store  # noqa: F401
 from .memory_cleanup import MKRAMCleanup, MKVRAMCleanup
 from .qwen_pe import MKQwenImage21PromptEnhancer
 from .save_image import MKSaveImage
@@ -39,7 +35,6 @@ NODE_CLASSES = [
     MKIgnoreGroups,
     MKIgnoreGroupsYouth,
     MKPromptConcat,
-    MKPromptLibrary,
     MKQwenImage21PromptEnhancer,
     MKVRAMCleanup,
     MKRAMCleanup,
@@ -56,9 +51,6 @@ NODE_CLASSES = [
     MKSaveImage,
     MKTiledUpscale,
     MKTiledUpscaleStitch,
-    MKPosePicker,
-    MKGarmentPicker,
-    MKFacePicker,
     MKTextEncodeQwenImage21,
 ]
 
@@ -71,7 +63,6 @@ __all__ = [
     "MKIgnoreGroups",
     "MKIgnoreGroupsYouth",
     "MKPromptConcat",
-    "MKPromptLibrary",
     "MKQwenImage21PromptEnhancer",
     "MKVRAMCleanup",
     "MKRAMCleanup",
@@ -88,8 +79,5 @@ __all__ = [
     "MKSaveImage",
     "MKTiledUpscale",
     "MKTiledUpscaleStitch",
-    "MKPosePicker",
-    "MKGarmentPicker",
-    "MKFacePicker",
     "MKTextEncodeQwenImage21",
 ]
