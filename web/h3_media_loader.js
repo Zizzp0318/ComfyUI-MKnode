@@ -293,7 +293,7 @@ const IMAGE_FIELDS = [
         step: 0.01, min: 0.01, max: 64, unit: "MP",
         presets: MP_PRESETS,
         showIf: (s) => s.scale_mode === "megapixels",
-        hint: "1.00 MP ≈ 100 万像素（如 1152×864）；等比缩放，比例与原图一致",
+        hint: "1.00 MP = 1024×1024 像素（与官方「缩放图像（像素）」同口径）；等比缩放，比例与原图一致",
     },
     {
         key: "size_multiple", label: "尺寸倍数", type: "number",

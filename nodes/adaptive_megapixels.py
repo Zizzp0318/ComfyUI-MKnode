@@ -15,8 +15,9 @@
 
 几点说明：
 
-- 单位是**百万像素(MP)**，1 MP = 1,000,000 像素，跟官方「按总像素缩放」里的 MP 一致。
-- 输出保留 **2 位小数**（如 1080×1928 = 2.08224 MP → 2.08），避免小数点后拖一长串；
+- 单位是**百万像素(MP)**，**1 MP = 1024 × 1024 = 1,048,576 像素**，与官方「缩放图像（像素）」
+  （`ImageScaleToTotalPixels`）的 MP 口径一致，输出值可直接喂给官方缩放节点。
+- 输出保留 **2 位小数**（如 1080×1928 = 1.9858 MP → 1.99），避免小数点后拖一长串；
   需要更细的精度可以改 `_OUTPUT_DIGITS`。
 - 最小 > 最大时按「最小值/最大值」自动换位，不会出现空区间。
 - 图像批次（多帧）取第一帧的宽高；同一批次的帧尺寸本来就相同。
@@ -27,6 +28,10 @@ from comfy_api.latest import io
 # 数值范围：0.01 MP（约 100×100）~ 64 MP（约 8K 以上），够覆盖常见需求
 MIN_MP_LIMIT = 0.01
 MAX_MP_LIMIT = 64.0
+
+# 1 MP = 1024 × 1024 像素：与官方「缩放图像（像素）」（ImageScaleToTotalPixels）同一口径，
+# 这样本节点输出的 MP 值直接喂给官方缩放节点，得到的像素数才对得上
+_PIXELS_PER_MP = 1024 * 1024
 
 # 输出保留的小数位数：2 位（2.08224 MP → 2.08）。想要更细的精度改这里即可。
 _OUTPUT_DIGITS = 2
@@ -46,7 +51,7 @@ def megapixels_of(image) -> float:
         image: ComfyUI 的 IMAGE，形状为 (B, H, W, C)（也兼容不带批次维的 (H, W, C)）。
 
     Returns:
-        总像素 / 1,000,000。
+        总像素 / (1024 × 1024)，与官方「缩放图像（像素）」的 MP 口径一致。
     """
     tensor = _first_image(image)
     if tensor is None:
@@ -54,7 +59,7 @@ def megapixels_of(image) -> float:
     # 倒数第 3、2 维固定是 H、W（最后一位是通道）
     height = int(tensor.shape[-3])
     width = int(tensor.shape[-2])
-    return (width * height) / 1_000_000.0
+    return (width * height) / float(_PIXELS_PER_MP)
 
 
 def clamp_megapixels(megapixels: float, min_megapixels: float, max_megapixels: float) -> float:

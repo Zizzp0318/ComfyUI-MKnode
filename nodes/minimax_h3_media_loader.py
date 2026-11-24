@@ -85,6 +85,10 @@ _PIL_RESAMPLE = {
 MAX_IMAGE_EDGE = 8192
 MAX_IMAGE_PIXELS = 64_000_000
 
+# 1 MP = 1024 × 1024 像素：与官方「缩放图像（像素）」（ImageScaleToTotalPixels）同一口径，
+# 这样面板上填的 MP 与官方缩放节点填的 MP 是同一个意思
+_PIXELS_PER_MP = 1024 * 1024
+
 # 目标总像素的取值范围（前端输入框同口径）
 MP_MIN, MP_MAX, MP_DEFAULT = 0.01, 64.0, 1.0          # 百万像素（MP）
 
@@ -268,16 +272,6 @@ def _clamp_target(nw, nh):
     return nw, nh, capped
 
 
-def _align_to_multiple(value, multiple):
-    """把 value 就近取整到 multiple 的整数倍，结果至少为一个 multiple。
-
-    与「MK-加载图像」的 size_multiple 同一套规则（四舍五入，不是向上取整）。
-    """
-    if multiple <= 1:
-        return max(1, int(value))
-    return max(multiple, ((int(value) + multiple // 2) // multiple) * multiple)
-
-
 def _align_down_to(value, multiple):
     """向下取整到 multiple 的倍数（上限压回后用它保证仍然是倍数）。"""
     if multiple <= 1:
@@ -288,28 +282,31 @@ def _align_down_to(value, multiple):
 def _target_size(w, h, target_mp, multiple=1):
     """按总像素算目标尺寸 → (tw, th, capped)。
 
-    目标总像素 = target_mp 百万像素；边长为原图 ×√(目标/原)，等比不失真，
-    再把宽高就近对齐到 multiple 的整数倍（1 = 不对齐）。
+    与官方「缩放图像（像素）」（``ImageScaleToTotalPixels``）**逐行一致**：
+
+        total    = target_mp * 1024 * 1024
+        scale_by = sqrt(total / (w * h))
+        width    = round(w * scale_by / steps) * steps
+        height   = round(h * scale_by / steps) * steps
+
+    注意不能用「先 round 到像素、再就近对齐到倍数」的两步写法：那会多出一次中间取整，
+    碰到 x.5 的边界就跟官方差一个步长（例：2920x1944 @1MP 步数8，两步写法 840，官方 832）。
+
+    只有结果越过单边/总量上限时才会压回（下游防 OOM），压回后向下对齐到倍数。
     """
     if w <= 0 or h <= 0:
         return max(1, w), max(1, h), False
-    target_px = float(target_mp) * 1_000_000.0
+    target_px = float(target_mp) * _PIXELS_PER_MP
     if target_px <= 0:
         return w, h, False
+    steps = max(1, int(multiple))
     scale = math.sqrt(target_px / float(w * h))
-    if abs(scale - 1.0) < 1e-9:             # 目标面积正好等于原图：原样
-        return w, h, False
-    tw = max(1, int(round(w * scale)))
-    th = max(1, int(round(h * scale)))
+    tw = max(steps, int(round(w * scale / steps)) * steps)
+    th = max(steps, int(round(h * scale / steps)) * steps)
     tw, th, capped = _clamp_target(tw, th)
-    tw = _align_to_multiple(tw, multiple)
-    th = _align_to_multiple(th, multiple)
-    # 对齐后可能又越过上限（multiple 较大时最多多出 128px）：压回后再向下对齐到倍数
-    if max(tw, th) > MAX_IMAGE_EDGE or tw * th > MAX_IMAGE_PIXELS:
-        tw, th, _ = _clamp_target(tw, th)
-        tw = _align_down_to(tw, multiple)
-        th = _align_down_to(th, multiple)
-        capped = True
+    if capped:
+        tw = _align_down_to(tw, steps)
+        th = _align_down_to(th, steps)
     return tw, th, capped
 
 
@@ -339,7 +336,7 @@ def prepare_image(path, item=None):
         img = img.resize((tw, th), _resample_of(item.get("scale_method")))
     if capped:
         note = "目标尺寸过大，已按上限压到 %dx%d（单边 %d / 总量 %dMP）" % (
-            tw, th, MAX_IMAGE_EDGE, MAX_IMAGE_PIXELS // 1_000_000)
+            tw, th, MAX_IMAGE_EDGE, MAX_IMAGE_PIXELS // _PIXELS_PER_MP)
     return img, note
 
 

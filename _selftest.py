@@ -38,33 +38,60 @@ print("  inputs      :", [i.id for i in schema.inputs])
 print("  outputs     :", [(o.id, o.display_name) for o in schema.outputs])
 check("node_id 正确", schema.node_id == "MK_LoadImage", schema.node_id)
 check("display_name 为 MK-加载图像", schema.display_name == "MK-加载图像", schema.display_name)
-check("输入数量为 5", len(schema.inputs) == 5)
+check("输入数量为 5", len(schema.inputs) == 5, str(len(schema.inputs)))
+check("输入顺序",
+      [i.id for i in schema.inputs] == ["image", "resize_mode", "target_megapixels",
+                                       "size_multiple", "upscale_method"],
+      str([i.id for i in schema.inputs]))
 check("输出数量为 4", len(schema.outputs) == 4)
 check("输出顺序 IMAGE/MASK/WIDTH/HEIGHT", [o.id for o in schema.outputs] == ["IMAGE", "MASK", "WIDTH", "HEIGHT"])
 
 print()
-print("=== 2. 目标尺寸算法 ===")
-cases = [
-    # (w, h, mp, multiple, 期望)
-    (900, 600, 1.0, 1, None),
-    (900, 600, 1.0, 64, None),
-    (1000, 1000, 1.0, 1, (1000, 1000)),
-    (1000, 1000, 4.0, 1, (2000, 2000)),
-    (1000, 1000, 0.25, 1, (500, 500)),
-    (1000, 1000, 1.0, 64, (1024, 1024)),
-]
-for w, h, mp, mult, expect in cases:
-    nw, nh = _compute_target_size(w, h, mp, mult)
-    ratio_in = w / h
-    ratio_out = nw / nh
-    pixels = nw * nh
-    print(f"  {w}x{h} mp={mp} mult={mult} -> {nw}x{nh}  pixels={pixels:,}  比例偏差={abs(ratio_out - ratio_in) / ratio_in:.4%}")
-    if expect:
-        check(f"  {w}x{h} mp={mp} mult={mult} 精确匹配", (nw, nh) == expect, f"got {(nw, nh)}")
-    if mult > 1:
-        check(f"  {w}x{h} mult={mult} 可被整除", nw % mult == 0 and nh % mult == 0, f"{(nw, nh)}")
+print("=== 2. 目标尺寸算法（与官方「缩放图像（像素）」逐项一致）===")
+from comfy_extras.nodes_post_processing import ImageScaleToTotalPixels  # noqa: E402
+import torch  # noqa: E402
 
-print()
+# ① 与官方节点实跑对比：同样参数必须得到同样的宽高
+_parity = [
+    (1000, 800, 1.0, 1), (1000, 800, 1.0, 32), (1000, 800, 1.5, 32),
+    (1000, 800, 1.0, 64), (1920, 1080, 1.0, 32), (1920, 1080, 2.0, 8),
+    (768, 1344, 1.5, 32), (1024, 1024, 1.0, 32), (3000, 1000, 1.0, 32),
+    (1234, 567, 1.5, 32), (512, 512, 0.25, 16),
+]
+for _w, _h, _mp, _st in _parity:
+    _img = torch.zeros(1, _h, _w, 3)
+    _out = ImageScaleToTotalPixels.execute(_img, "nearest-exact", _mp, _st).result[0]
+    _ow, _oh = int(_out.shape[2]), int(_out.shape[1])
+    _mw, _mh = _compute_target_size(_w, _h, _mp, _st)
+    check(f"  {_w}x{_h} {_mp}MP 步数{_st} 与官方一致", (_mw, _mh) == (_ow, _oh),
+          f"官方 {_ow}x{_oh} / MK {_mw}x{_mh}")
+
+# ② MP 基准是 1024²（不是 1000²）
+check("  1 MP 基准 = 1024x1024", _compute_target_size(1024, 1024, 1.0, 1) == (1024, 1024),
+      str(_compute_target_size(1024, 1024, 1.0, 1)))
+check("  4 MP 正方形 = 2048x2048", _compute_target_size(1024, 1024, 4.0, 1) == (2048, 2048),
+      str(_compute_target_size(1024, 1024, 4.0, 1)))
+check("  0.25 MP 正方形 = 512x512", _compute_target_size(1024, 1024, 0.25, 1) == (512, 512),
+      str(_compute_target_size(1024, 1024, 0.25, 1)))
+
+# ③ 尺寸倍数是「各自就近对齐」，与官方 resolution_steps 同义
+check("  1000x800 @1MP 步数32 -> 1152x928",
+      _compute_target_size(1000, 800, 1.0, 32) == (1152, 928),
+      str(_compute_target_size(1000, 800, 1.0, 32)))
+check("  步数 1 = 不对齐",
+      _compute_target_size(1000, 800, 1.0, 1) == (1145, 916),
+      str(_compute_target_size(1000, 800, 1.0, 1)))
+for _w, _h, _st in ((1000, 800, 32), (1920, 1080, 32), (1234, 567, 16)):
+    _mw, _mh = _compute_target_size(_w, _h, 1.5, _st)
+    check(f"  {_w}x{_h} 步数{_st} 宽高都能整除",
+          _mw % _st == 0 and _mh % _st == 0, f"{_mw}x{_mh}")
+
+# ④ 边界：非法输入不崩
+check("  宽高为 0 时原样返回", _compute_target_size(0, 0, 1.0, 32) == (1, 1))
+check("  megapixels<=0 时原样返回", _compute_target_size(640, 480, 0.0, 32) == (640, 480))
+check("  超大步数也不会算出 0", min(_compute_target_size(64, 64, 0.01, 256)) >= 256,
+      str(_compute_target_size(64, 64, 0.01, 256)))
+
 print("=== 3. execute 全分支（含 alpha 与无 alpha）===")
 methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
 from nodes import LoadImage as _NativeRef
@@ -911,15 +938,15 @@ check("  上下限都在 0.01 ~ 64", float(_am_min.min) == 0.01 and float(_am_ma
 # 判定规则
 # 输出统一保留 2 位小数：1.048576 → 1.05
 _am_cases = [
-    ("截图场景 1080x1928", (1928, 1080), 1.0, 4.0, 2.08),  # 2.08224 → 2.08
-    ("1024x1024 落在区间内", (1024, 1024), 1.0, 4.0, 1.05),  # 1.048576 → 1.05
+    ("截图场景 1080x1928", (1928, 1080), 1.0, 4.0, 1.99),  # 2.082240/1048576 → 1.99
+    ("1024x1024 落在区间内", (1024, 1024), 1.0, 4.0, 1.0),   # 正好 1.00 MP
     ("640x640 低于下限", (640, 640), 1.0, 4.0, 1.0),
     ("3000x3000 高于上限", (3000, 3000), 1.0, 4.0, 4.0),
     ("1000x1000 正好等于下限", (1000, 1000), 1.0, 4.0, 1.0),
-    ("四舍五入到两位（1.999396 → 2.0）", (1414, 1414), 1.0, 4.0, 2.0),
-    ("正好等于上限 2.0", (1000, 2000), 1.0, 2.0, 2.0),  # 2,000,000 像素
+    ("四舍五入到两位（1.906276 → 1.91）", (1414, 1414), 1.0, 4.0, 1.91),
+    ("正好等于上限 2.0", (2048, 1024), 1.0, 2.0, 2.0),  # 2,097,152 像素 = 2.00 MP
     ("最小==最大 → 固定值", (1024, 1024), 1.5, 1.5, 1.5),
-    ("最小>最大 → 自动换位", (1024, 1024), 4.0, 1.0, 1.05),
+    ("最小>最大 → 自动换位", (1024, 1024), 4.0, 1.0, 1.0),
     ("自定义小数范围", (1024, 1024), 2.5, 4.0, 2.5),
 ]
 for label, (h, w), lo, hi, expect in _am_cases:
@@ -934,9 +961,10 @@ check("  极小/极大也不会拖长小数", abs(clamp_megapixels(0.123456, 1.0
       and abs(clamp_megapixels(9.876543, 1.0, 4.0) - 4.0) < 1e-9)
 
 # 批次/单图两种形状都要能读出宽高
-check("  4 维 (B,H,W,C) 取宽高", abs(megapixels_of(_torch.zeros(2, 512, 1024, 3)) - 0.524288) < 1e-9)
-check("  3 维 (H,W,C) 也支持", abs(megapixels_of(_torch.zeros(512, 1024, 3)) - 0.524288) < 1e-9)
-check("  list 批次取第一张", abs(megapixels_of([_torch.zeros(1, 600, 800, 3)]) - 0.48) < 1e-9)
+check("  4 维 (B,H,W,C) 取宽高", abs(megapixels_of(_torch.zeros(2, 512, 1024, 3)) - 0.5) < 1e-9)
+check("  3 维 (H,W,C) 也支持", abs(megapixels_of(_torch.zeros(512, 1024, 3)) - 0.5) < 1e-9)
+check("  list 批次取第一张",
+      abs(megapixels_of([_torch.zeros(1, 600, 800, 3)]) - 480000 / (1024 * 1024)) < 1e-9)
 
 am_loc = loc_all.get("MK_AdaptiveMegapixels")
 check("  语言包含 MK_AdaptiveMegapixels", am_loc is not None)
@@ -1477,28 +1505,39 @@ check("  脏数据回落（mode→off、MP→64、旧字段全部丢弃）",
 check("  旧「按最长边」模式回落 off",
       _h3img.parse_settings({"images": [{"scale_mode": "longest_edge"}]})["images"][0]["scale_mode"]
       == "off")
-check("  目标尺寸：1.00MP -> 1000x800 变 1118x894",
-      _h3img._target_size(1000, 800, 1.0)[:2] == (1118, 894),
+check("  目标尺寸：1.00MP -> 1000x800 变 1145x916（与官方同口径）",
+      _h3img._target_size(1000, 800, 1.0)[:2] == (1145, 916),
       str(_h3img._target_size(1000, 800, 1.0)))
-check("  目标尺寸：4.00MP -> 1000x800 变 2236x1789",
-      _h3img._target_size(1000, 800, 4.0)[:2] == (2236, 1789),
+check("  目标尺寸：4.00MP -> 1000x800 变 2290x1832",
+      _h3img._target_size(1000, 800, 4.0)[:2] == (2290, 1832),
       str(_h3img._target_size(1000, 800, 4.0)))
-check("  目标 = 原面积时不动（0.8MP）",
-      _h3img._target_size(1000, 800, 0.8)[:2] == (1000, 800),
-      str(_h3img._target_size(1000, 800, 0.8)))
-check("  比例保持：3000x1000 缩到 1MP -> 1732x577",
-      _h3img._target_size(3000, 1000, 1.0)[:2] == (1732, 577),
+check("  目标 = 原面积时不动（1000x800 = 0.7629 MP）",
+      _h3img._target_size(1000, 800, 0.762939)[:2] == (1000, 800),
+      str(_h3img._target_size(1000, 800, 0.762939)))
+check("  比例保持：3000x1000 缩到 1MP -> 1774x591",
+      _h3img._target_size(3000, 1000, 1.0)[:2] == (1774, 591),
       str(_h3img._target_size(3000, 1000, 1.0)))
-check("  尺寸倍数：_align_to_multiple 就近对齐", 
-      _h3img._align_to_multiple(1118, 32) == 1120
-      and _h3img._align_to_multiple(1118, 64) == 1088
-      and _h3img._align_to_multiple(1118, 1) == 1118,
-      str((_h3img._align_to_multiple(1118, 32), _h3img._align_to_multiple(1118, 64))))
 check("  尺寸倍数：_target_size 带 multiple", 
-      _h3img._target_size(1000, 800, 1.0, 1)[:2] == (1118, 894)
-      and _h3img._target_size(1000, 800, 1.0, 32)[:2] == (1120, 896)
-      and _h3img._target_size(1000, 800, 1.0, 64)[:2] == (1088, 896),
+      _h3img._target_size(1000, 800, 1.0, 1)[:2] == (1145, 916)
+      and _h3img._target_size(1000, 800, 1.0, 32)[:2] == (1152, 928)
+      and _h3img._target_size(1000, 800, 1.0, 64)[:2] == (1152, 896),
       str(_h3img._target_size(1000, 800, 1.0, 64)))
+# 回归案例：2920x1944 @1MP 步数8 曾因「先 round 再对齐」多出一次取整算成 1256x840
+check("  2920x1944 @1MP 步数8 -> 1256x832（与官方一致，不是 840）",
+      _h3img._target_size(2920, 1944, 1.0, 8)[:2] == (1256, 832),
+      str(_h3img._target_size(2920, 1944, 1.0, 8)))
+# 与官方 ImageScaleToTotalPixels 逐个实跑对比，防止再次跑偏
+for _w, _h, _mp, _st in [
+    (2920, 1944, 1.0, 8), (2920, 1944, 1.0, 32), (2920, 1944, 2.0, 16),
+    (1000, 800, 1.0, 8), (1000, 800, 1.0, 64), (1920, 1080, 1.5, 8),
+    (3840, 2160, 2.0, 16), (777, 1333, 1.0, 32), (4096, 2731, 4.0, 8),
+]:
+    _img = torch.zeros(1, _h, _w, 3)
+    _off = ImageScaleToTotalPixels.execute(_img, "nearest-exact", _mp, _st).result[0]
+    _want = (int(_off.shape[2]), int(_off.shape[1]))
+    _got = _h3img._target_size(_w, _h, _mp, _st)[:2]
+    check(f"  {_w}x{_h} {_mp}MP 步数{_st} 与官方缩放一致", _got == _want,
+          f"官方 {_want[0]}x{_want[1]} / 素材加载 {_got[0]}x{_got[1]}")
 check("  尺寸倍数：默认 1，脏值钳到 1..256", 
       _h3img.parse_settings("")["images"][0]["size_multiple"] == 1
       and _h3img.parse_settings({"images": [{"size_multiple": 0}]})["images"][0]["size_multiple"] == 1

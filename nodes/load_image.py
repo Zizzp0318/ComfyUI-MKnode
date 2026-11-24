@@ -19,20 +19,27 @@ RESIZE_MODES = ["禁用", "按总像素"]
 UPSCALE_METHODS = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
 
 
-def _align_to_multiple(value: int, multiple: int) -> int:
-    """把 value 就近取整到 multiple 的整数倍，结果至少为一个 multiple。"""
-    if multiple <= 1:
-        return max(1, value)
-    return max(multiple, ((value + multiple // 2) // multiple) * multiple)
+def _compute_target_size(width: int, height: int, megapixels: float, size_multiple: int = 1):
+    """按目标总像素算目标宽高，算法与官方「缩放图像（像素）」逐行一致。
 
+    官方 ``ImageScaleToTotalPixels``（comfy_extras/nodes_post_processing.py）的实现：
 
-def _compute_target_size(width: int, height: int, megapixels: float, multiple: int):
-    """按目标总像素等比推算目标宽高，再对齐到 multiple 的整数倍。"""
-    target_pixels = megapixels * 1_000_000.0
-    scale = math.sqrt(target_pixels / float(width * height))
-    new_width = max(1, round(width * scale))
-    new_height = max(1, round(height * scale))
-    return _align_to_multiple(new_width, multiple), _align_to_multiple(new_height, multiple)
+        total    = megapixels * 1024 * 1024          # 1 MP = 1,048,576 像素
+        scale_by = sqrt(total / (w * h))
+        width    = round(w * scale_by / steps) * steps
+        height   = round(h * scale_by / steps) * steps
+
+    所以同样填「1.00 MP + 分辨率步数 32」时，本节点与官方节点的输出尺寸完全相同
+    （包括 1024² 这个 MP 基准、以及宽高各自就近对齐到步数倍数这两点）。
+    """
+    if width <= 0 or height <= 0 or megapixels <= 0:
+        return max(1, width), max(1, height)
+    steps = max(1, int(size_multiple))
+    total = float(megapixels) * 1024 * 1024
+    scale_by = math.sqrt(total / float(width * height))
+    new_width = max(steps, int(round(width * scale_by / steps)) * steps)
+    new_height = max(steps, int(round(height * scale_by / steps)) * steps)
+    return new_width, new_height
 
 
 def _upscale_bchw(samples: torch.Tensor, width: int, height: int, upscale_method: str) -> torch.Tensor:
@@ -75,7 +82,7 @@ class MKLoadImage(io.ComfyNode):
             node_id="MK_LoadImage",
             display_name="MK-加载图像",
             category="MK节点",
-            description="加载图像并可按目标总像素等比缩放，尺寸倍数用于把宽高对齐到指定整数倍。",
+            description="加载图像并可按目标总像素等比缩放，缩放算法与官方「缩放图像（像素）」一致（1 MP = 1024×1024，宽高就近对齐到尺寸倍数）。",
             search_aliases=["load image", "resize image", "load and resize", "加载图像", "缩放加载"],
             inputs=[
                 io.Combo.Input(
@@ -98,7 +105,8 @@ class MKLoadImage(io.ComfyNode):
                     min=0.01,
                     max=16.0,
                     step=0.01,
-                    tooltip="单位为百万像素(MP)，1 表示约 100 万像素。仅在缩放模式为「按总像素」时生效。",
+                    tooltip="单位为百万像素(MP)；1 MP 按 1024×1024 计，与官方「缩放图像（像素）」一致。"
+                            "仅在缩放模式为「按总像素」时生效。",
                 ),
                 io.Int.Input(
                     "size_multiple",
@@ -107,7 +115,8 @@ class MKLoadImage(io.ComfyNode):
                     min=1,
                     max=256,
                     step=1,
-                    tooltip="把缩放后的宽高就近对齐到该值的整数倍，1 表示不对齐。",
+                    tooltip="缩放后的宽高会就近对齐到该值的整数倍（对应官方的「分辨率步数」）。"
+                            "1 表示不对齐。",
                 ),
                 io.Combo.Input(
                     "upscale_method",
@@ -130,7 +139,8 @@ class MKLoadImage(io.ComfyNode):
         height, width = images.shape[1], images.shape[2]
 
         if resize_mode == RESIZE_MODES[1]:
-            new_width, new_height = _compute_target_size(width, height, target_megapixels, size_multiple)
+            new_width, new_height = _compute_target_size(
+                width, height, target_megapixels, size_multiple)
         else:
             new_width, new_height = width, height
 
