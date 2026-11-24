@@ -28,6 +28,7 @@ from .nodes import (
     MKLoadImage,
     MKLoraLoaderModelOnly,
     MKPromptConcat,
+    MKPromptPresetGallery,
     MKQwenImage21PromptEnhancer,
     MKVRAMCleanup,
     MKRAMCleanup,
@@ -39,6 +40,9 @@ from .nodes import (
 
 WEB_DIRECTORY = "./web"
 
+# 提示词预设图库的用户数据路由（/mk_ppg/*，落 user/default/MKnode/Prompt Preset），import 即注册
+from . import mk_ppg_store  # noqa: E402,F401
+
 NODE_CLASS_MAPPINGS = {
     "MK_LoadImage": MKLoadImage,
     "MK_ImageSelector": MKImageSelector,
@@ -47,6 +51,7 @@ NODE_CLASS_MAPPINGS = {
     "MK_IgnoreGroups": MKIgnoreGroups,
     "MK_IgnoreGroupsYouth": MKIgnoreGroupsYouth,
     "MK_PromptConcat": MKPromptConcat,
+    "MK_PromptPresetGallery": MKPromptPresetGallery,
     "MK_QwenImage21PromptEnhancer": MKQwenImage21PromptEnhancer,
     "MK_VRAMCleanup": MKVRAMCleanup,
     "MK_RAMCleanup": MKRAMCleanup,
@@ -75,6 +80,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_IgnoreGroups": "MK-禁用（忽略）多组老年关怀版",
     "MK_IgnoreGroupsYouth": "MK-禁用（忽略）多组青春版",
     "MK_PromptConcat": "MK-提示词拼接",
+    "MK_PromptPresetGallery": "MK-提示词预设图库",
     "MK_QwenImage21PromptEnhancer": "MK-Qwen Image 2.1提示词增强",
     "MK_VRAMCleanup": "MK-显存清理",
     "MK_RAMCleanup": "MK-内存清理",

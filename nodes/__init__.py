@@ -21,6 +21,7 @@ from .mask_is_empty import MKMaskIsEmpty
 from .minimax_h3_ref2video import MKMinimaxH3ReferenceToVideo
 from .lora_loader import MKLoraLoaderModelOnly
 from .prompt_concat import MKPromptConcat
+from .prompt_preset_gallery import MKPromptPresetGallery
 from .memory_cleanup import MKRAMCleanup, MKVRAMCleanup
 from .qwen_pe import MKQwenImage21PromptEnhancer
 from .save_image import MKSaveImage
@@ -35,6 +36,7 @@ NODE_CLASSES = [
     MKIgnoreGroups,
     MKIgnoreGroupsYouth,
     MKPromptConcat,
+    MKPromptPresetGallery,
     MKQwenImage21PromptEnhancer,
     MKVRAMCleanup,
     MKRAMCleanup,
@@ -63,6 +65,7 @@ __all__ = [
     "MKIgnoreGroups",
     "MKIgnoreGroupsYouth",
     "MKPromptConcat",
+    "MKPromptPresetGallery",
     "MKQwenImage21PromptEnhancer",
     "MKVRAMCleanup",
     "MKRAMCleanup",
