@@ -38,6 +38,7 @@ from .nodes import (
     MKSaveImage,
     MKTiledUpscale,
     MKTiledUpscaleStitch,
+    MKTextEncodeQwenImage21,
 )
 
 WEB_DIRECTORY = "./web"
@@ -76,6 +77,7 @@ NODE_CLASS_MAPPINGS = {
     "MKPosePicker": MKPosePicker,
     "MKGarmentPicker": MKGarmentPicker,
     "MKFacePicker": MKFacePicker,
+    "MK_TextEncodeQwenImage21": MKTextEncodeQwenImage21,
 }
 
 # V3 节点的显示名以 Schema 内的 display_name 为准，这里保持一致
@@ -107,6 +109,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MKPosePicker": "MK-姿态库",
     "MKGarmentPicker": "MK-服装库",
     "MKFacePicker": "MK-脸模库",
+    "MK_TextEncodeQwenImage21": "MK-Qwen Image 2.1文本编码器",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

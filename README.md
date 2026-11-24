@@ -21,6 +21,7 @@ MK 系列 ComfyUI 自定义节点合集：图像加载 / 选择 / 对比 / 保�
 | MK-自适应最长边 | 按图像长边输出分辨率（像素），并夹在你设定的最小/最大区间内 |
 | MK-提示词拼接 | 把多段提示词按分隔符拼成一条，输入端可动态增减 |
 | MK-Minimax H3多参考生视频 | 官方 MiniMax H3 参考生视频的完整复制版，参考图 / 视频 / 音频插槽全部常驻（不用点「+」加槽） |
+| MK-Qwen Image 2.1文本编码器 | 官方 Qwen Image 2.1 文本编码的完整复制版，16 个参考图像插槽全部常驻（不用点「+」加槽） |
 | MK-提示词大全 | 图片化提示词库：多级分类 + 缩略图网格，点图即把提示词填入文本框 |
 | MK-任意切换 | 多路任意类型输入，输出第一个非空值；输入端自动增减、类型自动跟随 |
 | MK-Qwen Image 2.1提示词增强 | 用 Qwen 官方 PE 模型把简短描述改写成完整提示词，支持文生图 / 图生图（最多 9 张参考图） |
@@ -536,6 +537,22 @@ MK-图像分块 ──分块（列表）──> 采样/重绘节点 ──> MK-�
 输出：`positive`（CONDITIONING）与音视频 `LATENT`，与官方完全一致。
 想改常驻槽位数量，改 `nodes/minimax_h3_ref2video.py` 顶部的 `REF_IMAGE_SLOTS` / `REF_VIDEO_SLOTS` /
 `REF_VIDEO_AUDIO_SLOTS` / `REF_AUDIO_SLOTS`（官方上限 9 / 3 / 3 / 3）。
+
+### MK-Qwen Image 2.1文本编码器
+
+官方 `comfy_extras/nodes_qwen.py` 里 `TextEncodeQwenImage21`（Text Encode Qwen Image 2.1）的完整复制，
+同样把官方的 `io.Autogrow` 参考图像输入换成常驻插槽，一次给满 16 个。
+
+| 输入 | 默认 | 说明 |
+| --- | --- | --- |
+| clip | — | Qwen Image 2.1 的文本编码器 |
+| prompt / negative_prompt | — | 正向 / 负向提示词，都支持动态提示词 |
+| vae | 空 | 接上后参考图像会作为 VAE latent 拼进序列；不接则只走文本编码器（`keep_vision` 生效） |
+| resolution | 1024 | 参考图按约 `resolution²` 像素、32 的倍数等比缩放；0 = 保持各自原尺寸（取 32 的倍数） |
+| 参考图像 1~16 | 空 | 每个插槽只用 1 张图，按序号顺序拼接 |
+
+输出：`positive`、`negative`（CONDITIONING）和 `latent`（按第一张参考图的尺寸生成空 latent，与官方一致）。
+想改常驻槽位数量，改 `nodes/text_encode_qwen_image21.py` 顶部的 `IMAGE_SLOTS`（官方上限 16）。
 
 ## 说明
 

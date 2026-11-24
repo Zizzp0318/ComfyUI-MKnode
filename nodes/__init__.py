@@ -29,6 +29,7 @@ from .memory_cleanup import MKRAMCleanup, MKVRAMCleanup
 from .qwen_pe import MKQwenImage21PromptEnhancer
 from .save_image import MKSaveImage
 from .tiled_upscale import MKTiledUpscale, MKTiledUpscaleStitch
+from .text_encode_qwen_image21 import MKTextEncodeQwenImage21
 
 NODE_CLASSES = [
     MKLoadImage,
@@ -58,6 +59,7 @@ NODE_CLASSES = [
     MKPosePicker,
     MKGarmentPicker,
     MKFacePicker,
+    MKTextEncodeQwenImage21,
 ]
 
 __all__ = [
@@ -89,4 +91,5 @@ __all__ = [
     "MKPosePicker",
     "MKGarmentPicker",
     "MKFacePicker",
+    "MKTextEncodeQwenImage21",
 ]
