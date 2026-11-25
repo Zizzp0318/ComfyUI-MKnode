@@ -1814,6 +1814,64 @@ if _b_loc:
           len(_b_loc.get("inputs", {})) == 9 and len(_b_loc.get("outputs", {})) == 1,
           str((len(_b_loc.get("inputs", {})), len(_b_loc.get("outputs", {})))))
 
+print("=== 25. 提示词增强：参考图像素数量（MK_QwenImage21PromptEnhancer）===")
+_q = pkg.NODE_CLASS_MAPPINGS.get("MK_QwenImage21PromptEnhancer")
+check("  已注册", _q is not None)
+_qq = sys.modules["Comfyui_MKnode.nodes.qwen_pe"]
+_q_ids = [i.id for i in _q.GET_SCHEMA().inputs]
+check("  「每张像素数量」紧贴在「最大生成token」上面",
+      "image_megapixels" in _q_ids
+      and _q_ids.index("image_megapixels") == _q_ids.index("max_output_tokens") - 1,
+      str(_q_ids))
+_q_in = {i.id: i for i in _q.GET_SCHEMA().inputs}
+check("  默认 1.00 MP，范围 0.10 ~ 4.00，步长 0.05",
+      (float(_q_in["image_megapixels"].default),
+       float(getattr(_q_in["image_megapixels"], "min", -1)),
+       float(getattr(_q_in["image_megapixels"], "max", -1)),
+       float(_q_in["image_megapixels"].step)) == (1.0, 0.1, 4.0, 0.05),
+      str(_q_in["image_megapixels"].default))
+check("  视觉塔对齐常数 = 32（patch 16 × merge 2）",
+      _qq.VISION_FACTOR == 32, str(_qq.VISION_FACTOR))
+
+# 目标尺寸：32 对齐 / 只缩不放 / 长宽比保持 / 极端长条兜底
+check("  1MP 的 1024x1024 原样不动", _qq._target_size(1024, 1024, 1.0) == (1024, 1024),
+      str(_qq._target_size(1024, 1024, 1.0)))
+check("  1MP 的 1000x800（0.76MP，不放大）→ 992x800",
+      _qq._target_size(1000, 800, 1.0) == (992, 800), str(_qq._target_size(1000, 800, 1.0)))
+check("  1MP 的 1920x1080 → 1376x768（比例保持）",
+      _qq._target_size(1920, 1080, 1.0) == (1376, 768), str(_qq._target_size(1920, 1080, 1.0)))
+check("  只缩不放：512x512 @1MP 保持 512x512",
+      _qq._target_size(512, 512, 1.0) == (512, 512), str(_qq._target_size(512, 512, 1.0)))
+check("  0.5MP 的 1024x1024 → 736x736",
+      _qq._target_size(1024, 1024, 0.5) == (736, 736), str(_qq._target_size(1024, 1024, 0.5)))
+check("  极端长条图受单边上限约束（<= 2048）",
+      max(_qq._target_size(8000, 200, 1.0)) <= _qq.MAX_IMAGE_EDGE,
+      str(_qq._target_size(8000, 200, 1.0)))
+check("  极小图补到模型 min_pixels（20x20 → 64x64）",
+      _qq._target_size(20, 20, 1.0) == (64, 64), str(_qq._target_size(20, 20, 1.0)))
+check("  所有输出长宽都能被 32 整除",
+      all(v % 32 == 0 for w, h in [(1000, 800), (1920, 1080), (777, 1333), (8000, 200),
+                                   (513, 65), (4096, 2731)]
+          for v in _qq._target_size(w, h, 1.0)),
+      str([_qq._target_size(w, h, 1.0) for w, h in [(777, 1333), (513, 65), (4096, 2731)]]))
+
+# token 预估：32×32 像素一个 token
+check("  1024x1024 = 32×32 = 1024 token",
+      _qq._vision_tokens(1024, 1024) == 1024, str(_qq._vision_tokens(1024, 1024)))
+check("  736x736 = 23×23 = 529 token",
+      _qq._vision_tokens(736, 736) == 529, str(_qq._vision_tokens(736, 736)))
+
+# 逐张缩放：形状 = 对齐后的尺寸，且不补边（尺寸只由目标像素决定）
+_two = _qq._prepare_image(torch.zeros(1, 800, 1000, 3), 1.0)
+check("  单张缩放后形状 = 对齐后尺寸（不补边）",
+      tuple(_two.shape) == (1, 800, 992, 3), str(tuple(_two.shape)))
+_big = _qq._prepare_image(torch.zeros(1, 400, 300, 3), 1.0)
+check("  小图不被放大（400x300 → 384x288，只做 32 对齐）",
+      tuple(_big.shape) == (1, 384, 288, 3), str(tuple(_big.shape)))
+check("  缩放后值域仍在 [0,1]", float(_two.max()) <= 1.0 and float(_two.min()) >= 0.0)
+check("  已彻底移除「共同画布 / 补边」实现",
+      not any(hasattr(_qq, n) for n in ("_fit", "_images_batch")))
+
 print()
 if fails:
     print(f"### 失败 {len(fails)} 项: {fails}")

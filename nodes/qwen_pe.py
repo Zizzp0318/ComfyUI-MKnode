@@ -11,12 +11,17 @@
 
 和内置 TextGenerate 节点是同一套机制。系统提示词用的是 Qwen 官方随 PE 模型发布的
 提示词工程规则，见 `qwen_pe_prompts.py`。
+
+参考图只需「让模型看懂」，不需要原图分辨率：每张按「每张像素数量」单独等比缩到目标
+像素数（只缩不放、长宽对齐到 32 的倍数、不补边不裁边），再以列表逐张送进 tokenizer。
+1 MP ≈ 1024 个视觉 token，所以这个参数就是显存与速度的主开关。
 """
 
 from __future__ import annotations
 
 import gc
 import json
+import math
 import re
 
 import comfy.model_management
@@ -33,8 +38,16 @@ from .qwen_pe_prompts import build_system_prompt
 SAMPLING = {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0}
 PRESENCE_PENALTY = {"文生图": 1.5, "图生图": 0.0}
 
-# 参考图统一缩放到的上限（长边像素），模型侧不需要原图分辨率
-MAX_IMAGE_EDGE = 1280
+# 视觉塔的 patch 几何：patch 16 × merge 2 → 一个视觉 token 覆盖 32×32 像素。
+# 长宽必须能被它整除，否则 comfy 的 patchify reshape 会直接失败，所以缩放时先对齐。
+VISION_FACTOR = 32
+# 极端长条图的安全上限（单边像素）：只做兜底，不参与每张的像素预算
+MAX_IMAGE_EDGE = 2048
+# 每张参考图缩放到的目标像素数；1 MP = 1024×1024，与包内其它节点同口径
+_PIXELS_PER_MP = 1024 * 1024
+# 模型侧 process_qwen2vl_images 的 min_pixels：比它小的图会被内部放大，这里先补齐好让 token 预估准
+_MIN_PIXELS = 3136
+MP_MIN, MP_MAX, MP_DEFAULT = 0.10, 4.00, 1.00
 # 生成预算至少留这么多 token，否则模型来不及输出 JSON
 MIN_GENERATE_TOKENS = 64
 
@@ -110,34 +123,50 @@ def _first_frame(image) -> torch.Tensor:
     return image[:1].float()[..., :3]
 
 
-def _fit(image: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
-    """等比缩放到不超过 size，再居中补边到正好 size（模型要求所有参考图同尺寸）。"""
-    height, width = int(image.shape[1]), int(image.shape[2])
-    target_h, target_w = size
-    scale = min(target_w / width, target_h / height)
-    new_w = max(1, round(width * scale))
-    new_h = max(1, round(height * scale))
-    if (new_w, new_h) != (width, height):
-        image = torch.nn.functional.interpolate(
-            image.movedim(-1, 1), size=(new_h, new_w), mode="bicubic", align_corners=False, antialias=True
+def _target_size(width: int, height: int, megapixels: float) -> tuple[int, int]:
+    """单张图按目标总像素算输出尺寸：只缩不放，长宽对齐到 VISION_FACTOR。
+
+    对齐口径与 comfy 的 ``smart_resize``（factor = patch 16 × merge 2 = 32）一致：
+    这里先对齐，送进 tokenizer 的尺寸就不会再被它改一次，token 预估也就准了。
+    """
+    px = max(0.0, float(megapixels)) * _PIXELS_PER_MP
+    if width <= 0 or height <= 0 or px <= 0:
+        return max(VISION_FACTOR, width), max(VISION_FACTOR, height)
+    scale = min(1.0, math.sqrt(px / float(width * height)))      # 只缩不放：小图不白烧 token
+    tw = max(VISION_FACTOR, int(round(width * scale / VISION_FACTOR)) * VISION_FACTOR)
+    th = max(VISION_FACTOR, int(round(height * scale / VISION_FACTOR)) * VISION_FACTOR)
+    edge = max(tw, th)
+    if edge > MAX_IMAGE_EDGE:                                    # 极端长条图兜底
+        k = MAX_IMAGE_EDGE / float(edge)
+        tw = max(VISION_FACTOR, int(tw * k) // VISION_FACTOR * VISION_FACTOR)
+        th = max(VISION_FACTOR, int(th * k) // VISION_FACTOR * VISION_FACTOR)
+    if tw * th < _MIN_PIXELS:                                    # 极小图：模型反正会放大，先补齐
+        k = math.sqrt(_MIN_PIXELS / float(tw * th))
+        tw = int(math.ceil(tw * k / VISION_FACTOR)) * VISION_FACTOR
+        th = int(math.ceil(th * k / VISION_FACTOR)) * VISION_FACTOR
+    return tw, th
+
+
+def _vision_tokens(height: int, width: int) -> int:
+    """这张图会占多少个视觉 token（32×32 像素一个）。"""
+    return max(1, (int(height) // VISION_FACTOR)) * max(1, (int(width) // VISION_FACTOR))
+
+
+def _prepare_image(image, megapixels: float) -> torch.Tensor:
+    """单张参考图缩到目标像素数：各自等比缩放，不补边、不裁边、不放大小图。
+
+    多张图尺寸不同也没关系 —— Qwen 的 tokenizer 本来就是逐张处理
+    （``images[i]`` → 各自 ``process_qwen2vl_images``），所以这里不做共同画布。
+    """
+    frame = _first_frame(image)
+    height, width = int(frame.shape[1]), int(frame.shape[2])
+    target_w, target_h = _target_size(width, height, megapixels)
+    if (target_w, target_h) != (width, height):
+        frame = torch.nn.functional.interpolate(
+            frame.movedim(-1, 1), size=(target_h, target_w),
+            mode="bicubic", align_corners=False, antialias=True,
         ).movedim(1, -1)
-    pad_bottom, pad_right = target_h - new_h, target_w - new_w
-    if pad_bottom or pad_right:
-        top, left = pad_bottom // 2, pad_right // 2
-        image = torch.nn.functional.pad(
-            image, (0, 0, left, pad_right - left, top, pad_bottom - top), mode="replicate"
-        )
-    return image.clamp_(0.0, 1.0)
-
-
-def _images_batch(images: list[torch.Tensor]) -> torch.Tensor:
-    """把多张参考图拼成一个批次：先各自缩到上限，再统一补到同一尺寸。"""
-    frames = [_first_frame(image) for image in images]
-    heights = [int(f.shape[1]) for f in frames]
-    widths = [int(f.shape[2]) for f in frames]
-    scale = min(1.0, MAX_IMAGE_EDGE / max(max(heights), max(widths)))
-    size = (max(1, round(max(heights) * scale)), max(1, round(max(widths) * scale)))
-    return torch.cat([_fit(frame, size) for frame in frames], dim=0)
+    return frame.clamp_(0.0, 1.0)
 
 
 def _vision_template(count: int, thinking: bool) -> str:
@@ -273,6 +302,20 @@ class MKQwenImage21PromptEnhancer(io.ComfyNode):
                     display_name="图生图PE模型",
                     tooltip="任务模式为「图生图」时使用的官方 PE 模型（models/text_encoders）。",
                 ),
+                io.Float.Input(
+                    "image_megapixels",
+                    display_name="每张像素数量",
+                    default=MP_DEFAULT,
+                    min=MP_MIN,
+                    max=MP_MAX,
+                    step=0.05,
+                    tooltip=(
+                        "图生图时每张参考图的像素上限（1 MP = 1024×1024）：大图缩到这个值，"
+                        "小图保持原样（不放大），不补边也不裁边，长宽对齐到 32 的倍数。"
+                        "图只是喂给视觉塔「看懂」用的：1 MP ≈ 1024 个视觉 token，0.5 MP 大多数画面够用，"
+                        "要看小字 / 纹理再往上调。调小能明显减少视觉 token、省显存也更快。"
+                    ),
+                ),
                 io.Int.Input(
                     "max_output_tokens",
                     display_name="最大生成token",
@@ -332,11 +375,12 @@ class MKQwenImage21PromptEnhancer(io.ComfyNode):
         output_language,
         t2i_model,
         i2i_model,
-        max_output_tokens,
-        context_length,
-        seed,
-        enable_thinking,
-        auto_unload,
+        image_megapixels=MP_DEFAULT,
+        max_output_tokens=4096,
+        context_length=8192,
+        seed=0,
+        enable_thinking=True,
+        auto_unload=True,
         image1=None,
         image2=None,
         image3=None,
@@ -365,15 +409,30 @@ class MKQwenImage21PromptEnhancer(io.ComfyNode):
         system_prompt = build_system_prompt(task_mode, output_language)
 
         tokenize_kwargs = {"thinking": bool(enable_thinking), "system_prompt": system_prompt}
+        vision_tokens = 0
         if references:
-            batch = _images_batch(references)
-            tokenize_kwargs["image"] = batch
-            tokenize_kwargs["llama_template"] = _vision_template(batch.shape[0], bool(enable_thinking))
+            # 逐张缩放后以列表传给 tokenizer：每张按自己的长宽比缩到目标像素数，
+            # 不拼成同一个 batch，所以不需要补边 / 裁边（Qwen 内部本来就是逐张编码）。
+            images = [_prepare_image(image, image_megapixels) for image in references]
+            tokenize_kwargs["images"] = images
+            tokenize_kwargs["llama_template"] = _vision_template(len(images), bool(enable_thinking))
+            vision_tokens = sum(
+                _vision_tokens(int(t.shape[1]), int(t.shape[2])) for t in images
+            )
+            print("[MK-提示词增强] %d 张参考图 × %.2f MP → 约 %d 个视觉 token（首张 %dx%d）"
+                  % (len(images), float(image_megapixels), vision_tokens,
+                     int(images[0].shape[2]), int(images[0].shape[1])))
         tokens = clip.tokenize(prompt.strip(), **tokenize_kwargs)
 
         # 「上下文长度」是总预算，扣掉提示词占用的部分才是能生成的量
-        budget = int(context_length) - _prompt_token_count(tokens)
+        prompt_tokens = _prompt_token_count(tokens)
+        budget = int(context_length) - prompt_tokens
         max_length = max(MIN_GENERATE_TOKENS, min(int(max_output_tokens), budget))
+        if budget < int(max_output_tokens):
+            print("[MK-提示词增强] ⚠️ 上下文不足：提示词 %d token（其中视觉 %d）+ 期望生成 %d > 上下文 %d，"
+                  "本次生成长度压到 %d；建议把「上下文长度」提到 ≥ %d"
+                  % (prompt_tokens, vision_tokens, int(max_output_tokens), int(context_length),
+                     max_length, prompt_tokens + int(max_output_tokens)))
 
         generated = clip.generate(
             tokens,
